@@ -2,15 +2,21 @@
 package testutil
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync/atomic"
+	"testing"
 
 	"github.com/opencontainers/go-digest"
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/docker/reference"
 )
 
@@ -128,5 +134,73 @@ func MustJSON(v any) []byte {
 		panic(err)
 	}
 	return b
+}
+
+// BuildImageConfig creates OCI image config JSON with the given labels.
+func BuildImageConfig(labels map[string]string) []byte {
+	return MustJSON(ocispecv1.Image{
+		Config: ocispecv1.ImageConfig{
+			Labels: labels,
+		},
+	})
+}
+
+// BuildManifest creates OCI manifest JSON with the given config and layers.
+func BuildManifest(config ocispecv1.Descriptor, layers ...ocispecv1.Descriptor) []byte {
+	return MustJSON(ocispecv1.Manifest{
+		MediaType: ocispecv1.MediaTypeImageManifest,
+		Config:    config,
+		Layers:    layers,
+	})
+}
+
+// SetupSingleManifest creates a single-platform manifest in the fake repo with the
+// given labels on its image config. Returns the manifest descriptor and raw bytes.
+func SetupSingleManifest(repo *FakeRepo, labels map[string]string, mediaType string) (ocispecv1.Descriptor, []byte) {
+	configBlob := BuildImageConfig(labels)
+	configDesc := repo.AddBlob(configBlob, ocispecv1.MediaTypeImageConfig)
+	manifestBytes := BuildManifest(configDesc)
+	desc := repo.AddManifest(manifestBytes, mediaType)
+	return desc, manifestBytes
+}
+
+// BuildTarLayer creates a tar archive containing files with the given name→content mapping.
+func BuildTarLayer(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for name, content := range files {
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name: name,
+			Mode: 0644,
+			Size: int64(len(content)),
+		}))
+		_, err := tw.Write([]byte(content))
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Close())
+	return buf.Bytes()
+}
+
+// AssertFileExists asserts that the file at path exists.
+func AssertFileExists(t *testing.T, path string) {
+	t.Helper()
+	_, err := os.Stat(path)
+	assert.NoError(t, err, "expected file to exist: %s", path)
+}
+
+// AssertFileNotExists asserts that the file at path does not exist.
+func AssertFileNotExists(t *testing.T, path string) {
+	t.Helper()
+	_, err := os.Stat(path)
+	assert.True(t, errors.Is(err, os.ErrNotExist), "expected file to not exist: %s", path)
+}
+
+// AssertFileContent asserts that the file at path has the expected content.
+func AssertFileContent(t *testing.T, path, expected string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	require.NoError(t, err, "reading file: %s", path)
+	assert.Equal(t, expected, string(content))
 }
 
