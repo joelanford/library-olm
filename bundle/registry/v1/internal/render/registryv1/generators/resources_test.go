@@ -12,8 +12,8 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/render/registryv1/generators"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/util"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/registryv1/generators"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util"
 )
 
 func Test_OptionsApplyToExecutesIgnoresNil(t *testing.T) {

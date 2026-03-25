@@ -11,7 +11,7 @@ import (
 
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 
-	"github.com/operator-framework/operator-controller/internal/operator-controller/config"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/config"
 )
 
 const (

@@ -10,10 +10,10 @@ import (
 
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 
-	"github.com/operator-framework/operator-controller/internal/operator-controller/config"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/bundle"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/util"
-	hashutil "github.com/operator-framework/operator-controller/internal/shared/util/hash"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/config"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util"
+	hashutil "github.com/operator-framework/library-go/bundle/registry/v1/internal/hash"
 )
 
 // BundleValidator validates a RegistryV1 bundle by executing a series of

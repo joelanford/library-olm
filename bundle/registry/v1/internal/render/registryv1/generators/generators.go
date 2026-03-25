@@ -22,10 +22,10 @@ import (
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	registrybundle "github.com/operator-framework/operator-registry/pkg/lib/bundle"
 
-	"github.com/operator-framework/operator-controller/internal/operator-controller/config"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/bundle"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/render"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/util"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/config"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util"
 )
 
 const (

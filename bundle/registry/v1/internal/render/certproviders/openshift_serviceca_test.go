@@ -10,8 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/render"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/render/certproviders"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/certproviders"
 )
 
 func Test_OpenshiftServiceCAProvider_InjectCABundle(t *testing.T) {

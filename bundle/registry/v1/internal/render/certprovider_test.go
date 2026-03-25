@@ -10,8 +10,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/render"
-	. "github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/util/testing"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render"
+	. "github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing"
 )
 
 func Test_CertificateProvisioner_WithoutCertProvider(t *testing.T) {

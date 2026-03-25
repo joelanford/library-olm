@@ -21,12 +21,12 @@ import (
 
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 
-	"github.com/operator-framework/operator-controller/internal/operator-controller/config"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/bundle"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/render"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/render/registryv1/generators"
-	. "github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/util/testing"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/util/testing/clusterserviceversion"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/config"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/registryv1/generators"
+	. "github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 func Test_ResourceGenerators(t *testing.T) {

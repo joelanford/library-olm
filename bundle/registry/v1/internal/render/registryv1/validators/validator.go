@@ -14,7 +14,7 @@ import (
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	regv1bundle "github.com/operator-framework/operator-registry/pkg/lib/bundle"
 
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/bundle"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
 )
 
 // CheckDeploymentSpecUniqueness checks that each strategy deployment spec in the csv has a unique name.

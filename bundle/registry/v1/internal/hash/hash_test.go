@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	hashutil "github.com/operator-framework/operator-controller/internal/shared/util/hash"
+	hashutil "github.com/operator-framework/library-go/bundle/registry/v1/internal/hash"
 )
 
 type unmarshalable struct{}

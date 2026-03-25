@@ -1,9 +1,9 @@
 package registryv1
 
 import (
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/render"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/render/registryv1/generators"
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/render/registryv1/validators"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/registryv1/generators"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/registryv1/validators"
 )
 
 // Renderer renders registry+v1 bundles into plain kubernetes manifests

@@ -13,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/operator-framework/operator-controller/internal/operator-controller/rukpak/util"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util"
 )
 
 func Test_ObjectNameForBaseAndSuffix(t *testing.T) {
