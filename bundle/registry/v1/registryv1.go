@@ -1,0 +1,57 @@
+package v1
+
+import (
+	"io/fs"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle/source"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/config"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render"
+	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/registryv1"
+)
+
+// Bundle is a parsed registry+v1 bundle containing a CSV, CRDs, and other resources.
+type Bundle = bundle.RegistryV1
+
+// Config holds validated configuration for a registry+v1 bundle.
+type Config = config.Config
+
+// CertificateProvider handles certificate provisioning for webhook resources.
+type CertificateProvider = render.CertificateProvider
+
+// DeploymentConfig contains optional customizations to apply to CSV deployments.
+type DeploymentConfig = config.DeploymentConfig
+
+// RenderOption configures rendering behavior.
+type RenderOption = render.Option
+
+// FromFS reads a registry+v1 bundle from the given filesystem and returns a Bundle.
+// The filesystem is expected to contain metadata/annotations.yaml and a manifests/ directory.
+func FromFS(bundleFS fs.FS) (Bundle, error) {
+	return source.FromFS(bundleFS).GetBundle()
+}
+
+// ValidateConfig validates raw user configuration (YAML or JSON) against the given
+// schema and install namespace constraints. The schema is typically obtained from
+// [Bundle.GetConfigSchema] and may be modified before validation (e.g., to remove
+// fields gated behind feature flags).
+var ValidateConfig = config.UnmarshalConfig
+
+// Render converts a parsed registry+v1 Bundle into plain Kubernetes manifests.
+func Render(b Bundle, installNamespace string, opts ...RenderOption) ([]client.Object, error) {
+	return registryv1.Renderer.Render(b, installNamespace, opts...)
+}
+
+var (
+	// WithTargetNamespaces sets the target namespaces for the rendered bundle.
+	WithTargetNamespaces = render.WithTargetNamespaces
+
+	// WithCertificateProvider sets the certificate provider for webhook resources.
+	WithCertificateProvider = render.WithCertificateProvider
+
+	// WithDeploymentConfig sets deployment customizations to apply to CSV deployments.
+	WithDeploymentConfig = render.WithDeploymentConfig
+)
+
