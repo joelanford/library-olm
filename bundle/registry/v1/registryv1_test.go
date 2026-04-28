@@ -125,7 +125,7 @@ func TestFromFS(t *testing.T) {
 	})
 }
 
-func TestRender(t *testing.T) {
+func TestToPlainManifests(t *testing.T) {
 	t.Run("renders a simple AllNamespaces bundle", func(t *testing.T) {
 		b := registryv1.Bundle{
 			PackageName: "my-operator",
@@ -151,7 +151,7 @@ func TestRender(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 		require.NotEmpty(t, objs)
 
@@ -187,7 +187,7 @@ func TestRender(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace", registryv1.WithTargetNamespaces("my-namespace"))
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace", registryv1.WithTargetNamespaces("my-namespace"))
 		require.NoError(t, err)
 		require.NotEmpty(t, objs)
 
@@ -221,7 +221,7 @@ func TestRender(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "install-ns", registryv1.WithTargetNamespaces("watch-ns"))
+		objs, err := registryv1.ToPlainManifests(b, "install-ns", registryv1.WithTargetNamespaces("watch-ns"))
 		require.NoError(t, err)
 		require.NotEmpty(t, objs)
 		assertHasObjectOfKind(t, objs, "Role")
@@ -244,7 +244,7 @@ func TestRender(t *testing.T) {
 			},
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "CustomResourceDefinition")
 	})
@@ -265,7 +265,7 @@ func TestRender(t *testing.T) {
 			},
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 		assertHasObjectOfKindAndName(t, objs, "ConfigMap", "my-cm")
 	})
@@ -286,7 +286,7 @@ func TestRender(t *testing.T) {
 			},
 		}
 
-		objs, err := registryv1.Render(b, "target-ns")
+		objs, err := registryv1.ToPlainManifests(b, "target-ns")
 		require.NoError(t, err)
 		cm := findObjectByKindAndName(objs, "ConfigMap", "my-cm")
 		require.NotNil(t, cm)
@@ -312,7 +312,7 @@ func TestRender(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 
 		dep := findObjectByKind(objs, "Deployment")
@@ -335,7 +335,7 @@ func TestRender(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 
 		// In AllNamespaces mode, permissions are promoted to ClusterRole/ClusterRoleBinding
@@ -360,14 +360,14 @@ func TestRender(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "ClusterRole")
 		assertHasObjectOfKind(t, objs, "ClusterRoleBinding")
 	})
 }
 
-func TestRender_Webhooks(t *testing.T) {
+func TestToPlainManifests_Webhooks(t *testing.T) {
 	t.Run("renders validating webhook", func(t *testing.T) {
 		sideEffects := admissionregistrationv1.SideEffectClassNone
 		b := registryv1.Bundle{
@@ -396,7 +396,7 @@ func TestRender_Webhooks(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "ValidatingWebhookConfiguration")
 		assertHasObjectOfKind(t, objs, "Service")
@@ -430,7 +430,7 @@ func TestRender_Webhooks(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "MutatingWebhookConfiguration")
 		assertHasObjectOfKind(t, objs, "Service")
@@ -473,7 +473,7 @@ func TestRender_Webhooks(t *testing.T) {
 			},
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 
 		crd := findObjectByKind(objs, "CustomResourceDefinition")
@@ -509,7 +509,7 @@ func TestRender_Webhooks(t *testing.T) {
 		}
 
 		provider := &certproviders.OpenshiftServiceCaCertificateProvider{}
-		objs, err := registryv1.Render(b, "my-namespace", registryv1.WithCertificateProvider(provider))
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace", registryv1.WithCertificateProvider(provider))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "ValidatingWebhookConfiguration")
 		assertHasObjectOfKind(t, objs, "Service")
@@ -548,7 +548,7 @@ func TestRender_Webhooks(t *testing.T) {
 		}
 
 		provider := &certproviders.CertManagerCertificateProvider{}
-		objs, err := registryv1.Render(b, "my-namespace", registryv1.WithCertificateProvider(provider))
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace", registryv1.WithCertificateProvider(provider))
 		require.NoError(t, err)
 
 		// cert-manager generates additional Issuer and Certificate objects
@@ -561,7 +561,7 @@ func TestRender_Webhooks(t *testing.T) {
 	})
 }
 
-func TestRender_WithDeploymentConfig(t *testing.T) {
+func TestToPlainManifests_WithDeploymentConfig(t *testing.T) {
 	baseBundle := func() registryv1.Bundle {
 		return registryv1.Bundle{
 			PackageName: "my-operator",
@@ -588,7 +588,7 @@ func TestRender_WithDeploymentConfig(t *testing.T) {
 				{Name: "MY_ENV", Value: "my-value"},
 			},
 		}
-		objs, err := registryv1.Render(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		require.NotEmpty(t, objs)
 		assertHasObjectOfKind(t, objs, "Deployment")
@@ -600,7 +600,7 @@ func TestRender_WithDeploymentConfig(t *testing.T) {
 				{Key: "key1", Operator: corev1.TolerationOpEqual, Value: "value1", Effect: corev1.TaintEffectNoSchedule},
 			},
 		}
-		objs, err := registryv1.Render(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -609,7 +609,7 @@ func TestRender_WithDeploymentConfig(t *testing.T) {
 		dc := &registryv1.DeploymentConfig{
 			NodeSelector: map[string]string{"disk": "ssd"},
 		}
-		objs, err := registryv1.Render(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -622,19 +622,19 @@ func TestRender_WithDeploymentConfig(t *testing.T) {
 				},
 			},
 		}
-		objs, err := registryv1.Render(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
 
 	t.Run("nil deployment config is a no-op", func(t *testing.T) {
-		objs, err := registryv1.Render(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(nil))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(nil))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
 }
 
-func TestRender_Validation(t *testing.T) {
+func TestToPlainManifests_Validation(t *testing.T) {
 	t.Run("rejects empty package name", func(t *testing.T) {
 		b := registryv1.Bundle{
 			CSV: clusterserviceversion.Builder().
@@ -642,7 +642,7 @@ func TestRender_Validation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "my-namespace")
+		_, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "package name is empty")
 	})
@@ -659,7 +659,7 @@ func TestRender_Validation(t *testing.T) {
 				).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "my-namespace")
+		_, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "duplicate strategy deployment spec")
 	})
@@ -673,7 +673,7 @@ func TestRender_Validation(t *testing.T) {
 				WithOwnedCRDs(v1alpha1.CRDDescription{Name: "foos.example.com"}).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "my-namespace")
+		_, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "foos.example.com")
 	})
@@ -686,7 +686,7 @@ func TestRender_Validation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeSingleNamespace).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "my-namespace", registryv1.WithTargetNamespaces(""))
+		_, err := registryv1.ToPlainManifests(b, "my-namespace", registryv1.WithTargetNamespaces(""))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "do not support targeting all namespaces")
 	})
@@ -709,7 +709,7 @@ func TestRender_Validation(t *testing.T) {
 				{ObjectMeta: metav1.ObjectMeta{Name: "foos.example.com"}},
 			},
 		}
-		_, err := registryv1.Render(b, "my-namespace", registryv1.WithTargetNamespaces("my-namespace"))
+		_, err := registryv1.ToPlainManifests(b, "my-namespace", registryv1.WithTargetNamespaces("my-namespace"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "conversion webhook")
 	})
@@ -730,7 +730,7 @@ func TestRender_Validation(t *testing.T) {
 				}).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "my-namespace")
+		_, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "non-existent deployment")
 	})
@@ -750,13 +750,13 @@ func TestRender_Validation(t *testing.T) {
 				}},
 			},
 		}
-		_, err := registryv1.Render(b, "my-namespace")
+		_, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "UnsupportedKind")
 	})
 }
 
-func TestRender_DeploymentConfigDetails(t *testing.T) {
+func TestToPlainManifests_DeploymentConfigDetails(t *testing.T) {
 	baseBundle := func() registryv1.Bundle {
 		return registryv1.Bundle{
 			PackageName: "my-operator",
@@ -785,7 +785,7 @@ func TestRender_DeploymentConfigDetails(t *testing.T) {
 				}},
 			},
 		}
-		objs, err := registryv1.Render(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -799,7 +799,7 @@ func TestRender_DeploymentConfigDetails(t *testing.T) {
 				{Name: "data", MountPath: "/data"},
 			},
 		}
-		objs, err := registryv1.Render(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -820,7 +820,7 @@ func TestRender_DeploymentConfigDetails(t *testing.T) {
 				PodAntiAffinity: &corev1.PodAntiAffinity{},
 			},
 		}
-		objs, err := registryv1.Render(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -829,13 +829,13 @@ func TestRender_DeploymentConfigDetails(t *testing.T) {
 		dc := &registryv1.DeploymentConfig{
 			Annotations: map[string]string{"custom-key": "custom-value"},
 		}
-		objs, err := registryv1.Render(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
 }
 
-func TestRender_WebhookWithTargetNamespaces(t *testing.T) {
+func TestToPlainManifests_WebhookWithTargetNamespaces(t *testing.T) {
 	sideEffects := admissionregistrationv1.SideEffectClassNone
 
 	t.Run("validating webhook with specific target namespace sets namespace selector", func(t *testing.T) {
@@ -865,7 +865,7 @@ func TestRender_WebhookWithTargetNamespaces(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "install-ns", registryv1.WithTargetNamespaces("watch-ns"))
+		objs, err := registryv1.ToPlainManifests(b, "install-ns", registryv1.WithTargetNamespaces("watch-ns"))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "ValidatingWebhookConfiguration")
 	})
@@ -897,13 +897,13 @@ func TestRender_WebhookWithTargetNamespaces(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "install-ns", registryv1.WithTargetNamespaces("watch-ns"))
+		objs, err := registryv1.ToPlainManifests(b, "install-ns", registryv1.WithTargetNamespaces("watch-ns"))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "MutatingWebhookConfiguration")
 	})
 }
 
-func TestRender_MultiNamespace(t *testing.T) {
+func TestToPlainManifests_MultiNamespace(t *testing.T) {
 	t.Run("MultiNamespace generates roles per target namespace", func(t *testing.T) {
 		b := registryv1.Bundle{
 			PackageName: "my-operator",
@@ -929,7 +929,7 @@ func TestRender_MultiNamespace(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "install-ns", registryv1.WithTargetNamespaces("ns1", "ns2"))
+		objs, err := registryv1.ToPlainManifests(b, "install-ns", registryv1.WithTargetNamespaces("ns1", "ns2"))
 		require.NoError(t, err)
 		// Should generate Role+RoleBinding per target namespace
 		roles := findAllObjectsOfKind(objs, "Role")
@@ -939,7 +939,7 @@ func TestRender_MultiNamespace(t *testing.T) {
 	})
 }
 
-func TestRender_ServiceAccountHandling(t *testing.T) {
+func TestToPlainManifests_ServiceAccountHandling(t *testing.T) {
 	t.Run("default service account is not generated", func(t *testing.T) {
 		b := registryv1.Bundle{
 			PackageName: "my-operator",
@@ -955,7 +955,7 @@ func TestRender_ServiceAccountHandling(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 		assertNoObjectOfKind(t, objs, "ServiceAccount")
 	})
@@ -975,13 +975,13 @@ func TestRender_ServiceAccountHandling(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.Render(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "ServiceAccount")
 	})
 }
 
-func TestRender_AdditionalValidation(t *testing.T) {
+func TestToPlainManifests_AdditionalValidation(t *testing.T) {
 	t.Run("rejects duplicate webhook names", func(t *testing.T) {
 		sideEffects := admissionregistrationv1.SideEffectClassNone
 		b := registryv1.Bundle{
@@ -1008,7 +1008,7 @@ func TestRender_AdditionalValidation(t *testing.T) {
 				).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, "ns")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "duplicate webhook")
 	})
@@ -1025,7 +1025,7 @@ func TestRender_AdditionalValidation(t *testing.T) {
 				{ObjectMeta: metav1.ObjectMeta{Name: "foos.example.com"}},
 			},
 		}
-		_, err := registryv1.Render(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, "ns")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "duplicate custom resource definition")
 	})
@@ -1050,7 +1050,7 @@ func TestRender_AdditionalValidation(t *testing.T) {
 				}).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, "ns")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "forbidden rule")
 	})
@@ -1080,7 +1080,7 @@ func TestRender_AdditionalValidation(t *testing.T) {
 				{ObjectMeta: metav1.ObjectMeta{Name: "foos.example.com"}},
 			},
 		}
-		_, err := registryv1.Render(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, "ns")
 		require.Error(t, err)
 	})
 
@@ -1098,13 +1098,13 @@ func TestRender_AdditionalValidation(t *testing.T) {
 				}).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, "ns")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "not owned")
 	})
 }
 
-func TestRender_WebhookWithCustomContainerPort(t *testing.T) {
+func TestToPlainManifests_WebhookWithCustomContainerPort(t *testing.T) {
 	sideEffects := admissionregistrationv1.SideEffectClassNone
 	b := registryv1.Bundle{
 		PackageName: "my-operator",
@@ -1134,13 +1134,13 @@ func TestRender_WebhookWithCustomContainerPort(t *testing.T) {
 			Build(),
 	}
 
-	objs, err := registryv1.Render(b, "ns")
+	objs, err := registryv1.ToPlainManifests(b, "ns")
 	require.NoError(t, err)
 	assertHasObjectOfKind(t, objs, "Service")
 	assertHasObjectOfKind(t, objs, "ValidatingWebhookConfiguration")
 }
 
-func TestRender_ConversionWebhookWithCertProvider(t *testing.T) {
+func TestToPlainManifests_ConversionWebhookWithCertProvider(t *testing.T) {
 	t.Run("cert-manager with conversion webhook generates cert resources and modifies CRD", func(t *testing.T) {
 		b := registryv1.Bundle{
 			PackageName: "my-operator",
@@ -1177,7 +1177,7 @@ func TestRender_ConversionWebhookWithCertProvider(t *testing.T) {
 		}
 
 		provider := &certproviders.CertManagerCertificateProvider{}
-		objs, err := registryv1.Render(b, "ns", registryv1.WithCertificateProvider(provider))
+		objs, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithCertificateProvider(provider))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Issuer")
 		assertHasObjectOfKind(t, objs, "Certificate")
@@ -1223,7 +1223,7 @@ func TestRender_ConversionWebhookWithCertProvider(t *testing.T) {
 		}
 
 		provider := &certproviders.OpenshiftServiceCaCertificateProvider{}
-		objs, err := registryv1.Render(b, "ns", registryv1.WithCertificateProvider(provider))
+		objs, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithCertificateProvider(provider))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "CustomResourceDefinition")
 
@@ -1278,7 +1278,7 @@ func TestFromFS_ErrorPaths(t *testing.T) {
 	})
 }
 
-func TestRender_MoreValidation(t *testing.T) {
+func TestToPlainManifests_MoreValidation(t *testing.T) {
 	t.Run("rejects invalid webhook name", func(t *testing.T) {
 		sideEffects := admissionregistrationv1.SideEffectClassNone
 		b := registryv1.Bundle{
@@ -1296,7 +1296,7 @@ func TestRender_MoreValidation(t *testing.T) {
 				}).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, "ns")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid name")
 	})
@@ -1310,7 +1310,7 @@ func TestRender_MoreValidation(t *testing.T) {
 				WithStrategyDeploymentSpecs(v1alpha1.StrategyDeploymentSpec{Name: "INVALID_DEP!!"}).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, "ns")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid")
 	})
@@ -1338,7 +1338,7 @@ func TestRender_MoreValidation(t *testing.T) {
 				}).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, "ns")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "forbidden rule")
 	})
@@ -1351,7 +1351,7 @@ func TestRender_MoreValidation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "ns", registryv1.WithTargetNamespaces("ns"))
+		_, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithTargetNamespaces("ns"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "do not support targeting own namespace")
 	})
@@ -1364,7 +1364,7 @@ func TestRender_MoreValidation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "ns", registryv1.WithTargetNamespaces("a", "b"))
+		_, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithTargetNamespaces("a", "b"))
 		require.Error(t, err)
 	})
 
@@ -1376,7 +1376,7 @@ func TestRender_MoreValidation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeMultiNamespace).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "ns", registryv1.WithTargetNamespaces("ns", "other"))
+		_, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithTargetNamespaces("ns", "other"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "do not support targeting own namespace")
 	})
@@ -1389,12 +1389,12 @@ func TestRender_MoreValidation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeOwnNamespace).
 				Build(),
 		}
-		_, err := registryv1.Render(b, "ns", registryv1.WithTargetNamespaces("different-ns"))
+		_, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithTargetNamespaces("different-ns"))
 		require.Error(t, err)
 	})
 }
 
-func TestFromFSThenRender(t *testing.T) {
+func TestFromFSThenToPlainManifests(t *testing.T) {
 	t.Run("end-to-end: parse then render", func(t *testing.T) {
 		fs := bundlefs.Builder().
 			WithPackageName("e2e-operator").
@@ -1429,7 +1429,7 @@ func TestFromFSThenRender(t *testing.T) {
 		b, err := registryv1.FromFS(fs)
 		require.NoError(t, err)
 
-		objs, err := registryv1.Render(b, "operator-ns")
+		objs, err := registryv1.ToPlainManifests(b, "operator-ns")
 		require.NoError(t, err)
 		require.NotEmpty(t, objs)
 

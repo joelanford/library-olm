@@ -39,8 +39,8 @@ func FromFS(bundleFS fs.FS) (Bundle, error) {
 // fields gated behind feature flags).
 var ValidateConfig = config.UnmarshalConfig
 
-// Render converts a parsed registry+v1 Bundle into plain Kubernetes manifests.
-func Render(b Bundle, installNamespace string, opts ...RenderOption) ([]client.Object, error) {
+// ToPlainManifests converts a parsed registry+v1 Bundle into plain Kubernetes manifests.
+func ToPlainManifests(b Bundle, installNamespace string, opts ...RenderOption) ([]client.Object, error) {
 	return registryv1.Renderer.Render(b, installNamespace, opts...)
 }
 
