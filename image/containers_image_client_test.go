@@ -7,14 +7,13 @@ import (
 	"io"
 	"testing"
 
+	"github.com/joelanford/library-olm/image/internal/testutil"
 	"github.com/opencontainers/go-digest"
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/types"
-
-	"github.com/operator-framework/library-go/image/internal/testutil"
 )
 
 // fakeImageSource implements types.ImageSource for testing.
@@ -85,11 +84,11 @@ type fakeImageReference struct {
 	transport types.ImageTransport
 }
 
-func (f *fakeImageReference) Transport() types.ImageTransport            { return f.transport }
-func (f *fakeImageReference) StringWithinTransport() string              { return "" }
-func (f *fakeImageReference) DockerReference() reference.Named           { return f.ref }
-func (f *fakeImageReference) PolicyConfigurationIdentity() string        { return "" }
-func (f *fakeImageReference) PolicyConfigurationNamespaces() []string    { return nil }
+func (f *fakeImageReference) Transport() types.ImageTransport         { return f.transport }
+func (f *fakeImageReference) StringWithinTransport() string           { return "" }
+func (f *fakeImageReference) DockerReference() reference.Named        { return f.ref }
+func (f *fakeImageReference) PolicyConfigurationIdentity() string     { return "" }
+func (f *fakeImageReference) PolicyConfigurationNamespaces() []string { return nil }
 func (f *fakeImageReference) DeleteImage(_ context.Context, _ *types.SystemContext) error {
 	return nil
 }

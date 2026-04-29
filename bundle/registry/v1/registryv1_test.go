@@ -4,6 +4,11 @@ import (
 	"testing"
 	"testing/fstest"
 
+	registryv1 "github.com/joelanford/library-olm/bundle/registry/v1"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/certproviders"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/bundlefs"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
@@ -14,15 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
-
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	registryv1 "github.com/operator-framework/library-go/bundle/registry/v1"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/certproviders"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing/bundlefs"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 func TestFromFS(t *testing.T) {
@@ -816,7 +813,7 @@ func TestToPlainManifests_DeploymentConfigDetails(t *testing.T) {
 						},
 					},
 				},
-				PodAffinity: &corev1.PodAffinity{},
+				PodAffinity:     &corev1.PodAffinity{},
 				PodAntiAffinity: &corev1.PodAntiAffinity{},
 			},
 		}
@@ -1236,7 +1233,7 @@ func TestToPlainManifests_ConversionWebhookWithCertProvider(t *testing.T) {
 func TestFromFS_ErrorPaths(t *testing.T) {
 	t.Run("fails on subdirectory in manifests", func(t *testing.T) {
 		fs := fstest.MapFS{
-			"metadata/annotations.yaml": &fstest.MapFile{Data: []byte("annotations:\n  operators.operatorframework.io.bundle.package.v1: test\n")},
+			"metadata/annotations.yaml":  &fstest.MapFile{Data: []byte("annotations:\n  operators.operatorframework.io.bundle.package.v1: test\n")},
 			"manifests/subdir/file.yaml": &fstest.MapFile{Data: []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n")},
 		}
 		_, err := registryv1.FromFS(fs)

@@ -6,14 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/joelanford/library-olm/image/internal/testutil"
 	"github.com/opencontainers/go-digest"
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/manifest"
 	"helm.sh/helm/v4/pkg/downloader"
-
-	"github.com/operator-framework/library-go/image/internal/testutil"
 )
 
 // buildHelmManifest creates a Helm OCI artifact manifest with the given config,

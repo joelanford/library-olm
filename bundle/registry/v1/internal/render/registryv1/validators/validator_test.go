@@ -4,18 +4,16 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/registryv1/validators"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
-
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/registryv1/validators"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 func Test_CheckDeploymentSpecUniqueness(t *testing.T) {

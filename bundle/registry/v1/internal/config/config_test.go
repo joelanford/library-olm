@@ -4,16 +4,14 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
-
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
-
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/config"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 func Test_UnmarshalConfig(t *testing.T) {

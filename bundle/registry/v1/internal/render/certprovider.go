@@ -6,7 +6,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 )
 
 // CertificateProvider encapsulate the creation and modification of object for certificate provisioning

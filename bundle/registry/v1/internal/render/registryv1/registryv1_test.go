@@ -4,20 +4,18 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/registryv1"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/registryv1/generators"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/registryv1/validators"
+	. "github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
-
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/registryv1"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/registryv1/generators"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/registryv1/validators"
-	. "github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 func Test_BundleValidatorHasAllValidationFns(t *testing.T) {

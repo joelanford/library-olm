@@ -16,8 +16,8 @@ import (
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/operator-framework/operator-registry/alpha/property"
 
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
-	registry "github.com/operator-framework/library-go/bundle/registry/v1/internal/operator-registry"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	registry "github.com/joelanford/library-olm/bundle/registry/v1/internal/operator-registry"
 )
 
 const (

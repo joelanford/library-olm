@@ -6,14 +6,12 @@ import (
 	"strings"
 	"testing/fstest"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/yaml"
-
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle/source"
+	registry "github.com/joelanford/library-olm/bundle/registry/v1/internal/operator-registry"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/operator-framework/operator-registry/alpha/property"
-
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle/source"
-	registry "github.com/operator-framework/library-go/bundle/registry/v1/internal/operator-registry"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 )
 
 const (

@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/joelanford/library-olm/image"
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/types"
-
-	"github.com/operator-framework/library-go/image"
 )
 
 // ConfigDirLabel is the label on catalog images that specifies the directory

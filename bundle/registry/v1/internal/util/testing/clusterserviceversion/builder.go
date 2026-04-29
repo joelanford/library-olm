@@ -1,10 +1,9 @@
 package clusterserviceversion
 
 import (
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 )
 
 var installModes = []v1alpha1.InstallModeType{

@@ -4,17 +4,15 @@ import (
 	"io/fs"
 	"testing"
 
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle/source"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/bundlefs"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
-
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle/source"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing/bundlefs"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 const (

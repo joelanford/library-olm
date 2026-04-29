@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/sets"
-
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
-
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/config"
 )
 
 const (

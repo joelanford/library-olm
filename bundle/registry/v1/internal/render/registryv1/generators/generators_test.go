@@ -6,6 +6,13 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/registryv1/generators"
+	. "github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -18,15 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
-
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/config"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/bundle"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/render/registryv1/generators"
-	. "github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing"
-	"github.com/operator-framework/library-go/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 func Test_ResourceGenerators(t *testing.T) {

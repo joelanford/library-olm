@@ -10,13 +10,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/joelanford/library-olm/image/internal/testutil"
 	"github.com/opencontainers/go-digest"
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/manifest"
-
-	"github.com/operator-framework/library-go/image/internal/testutil"
 )
 
 func TestIsIndex(t *testing.T) {
@@ -147,8 +146,10 @@ func TestUnpacker_Unpack(t *testing.T) {
 		inner := setupRepo(t)
 
 		errHandler := &configurableHandler{
-			name:      "err-handler",
-			matchFunc: func(context.Context, Repository, ocispecv1.Descriptor, []byte) (bool, error) { return false, fmt.Errorf("match boom") },
+			name: "err-handler",
+			matchFunc: func(context.Context, Repository, ocispecv1.Descriptor, []byte) (bool, error) {
+				return false, fmt.Errorf("match boom")
+			},
 		}
 		goodHandler := &configurableHandler{
 			name:      "good-handler",
@@ -166,12 +167,16 @@ func TestUnpacker_Unpack(t *testing.T) {
 		inner := setupRepo(t)
 		r := NewUnpacker(
 			&configurableHandler{
-				name:      "err-a",
-				matchFunc: func(context.Context, Repository, ocispecv1.Descriptor, []byte) (bool, error) { return false, fmt.Errorf("boom-a") },
+				name: "err-a",
+				matchFunc: func(context.Context, Repository, ocispecv1.Descriptor, []byte) (bool, error) {
+					return false, fmt.Errorf("boom-a")
+				},
 			},
 			&configurableHandler{
-				name:      "err-b",
-				matchFunc: func(context.Context, Repository, ocispecv1.Descriptor, []byte) (bool, error) { return false, fmt.Errorf("boom-b") },
+				name: "err-b",
+				matchFunc: func(context.Context, Repository, ocispecv1.Descriptor, []byte) (bool, error) {
+					return false, fmt.Errorf("boom-b")
+				},
 			},
 		)
 

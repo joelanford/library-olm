@@ -42,7 +42,7 @@ type FakeRepo struct {
 	CloseErr error
 
 	// Counters track how many times each method was called.
-	ResolveCount      atomic.Int32
+	ResolveCount       atomic.Int32
 	FetchManifestCount atomic.Int32
 	FetchBlobCount     atomic.Int32
 	CloseCount         atomic.Int32
@@ -203,4 +203,3 @@ func AssertFileContent(t *testing.T, path, expected string) {
 	require.NoError(t, err, "reading file: %s", path)
 	assert.Equal(t, expected, string(content))
 }
-

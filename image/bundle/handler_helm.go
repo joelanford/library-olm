@@ -9,10 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/joelanford/library-olm/image"
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"helm.sh/helm/v4/pkg/downloader"
-
-	"github.com/operator-framework/library-go/image"
 )
 
 // Helm OCI artifact media types as defined by the Helm specification.
