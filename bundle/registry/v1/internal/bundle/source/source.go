@@ -7,17 +7,15 @@ import (
 	"io/fs"
 	"path/filepath"
 
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	registry "github.com/joelanford/library-olm/bundle/registry/v1/internal/operator-registry"
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"github.com/operator-framework/operator-registry/alpha/property"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/cli-runtime/pkg/resource"
 	"sigs.k8s.io/yaml"
-
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
-	"github.com/operator-framework/operator-registry/alpha/property"
-
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
-	registry "github.com/joelanford/library-olm/bundle/registry/v1/internal/operator-registry"
 )
 
 const (
@@ -90,7 +88,7 @@ func (f fsBundleSource) GetBundle() (bundle.RegistryV1, error) {
 		if err != nil {
 			return err
 		}
-		defer manifestFile.Close()
+		defer func() { _ = manifestFile.Close() }()
 
 		result := resource.NewLocalBuilder().Unstructured().Flatten().Stream(manifestFile, path).Do()
 		if err := result.Err(); err != nil {

@@ -30,11 +30,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"sigs.k8s.io/yaml"
-
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 )
 
 const (

@@ -3,10 +3,9 @@ package render
 import (
 	"strings"
 
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 )
 
 // CertificateProvider encapsulate the creation and modification of object for certificate provisioning
