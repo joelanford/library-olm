@@ -22,10 +22,16 @@ func OpenDB() (*sql.DB, string, error) {
 		return nil, "", fmt.Errorf("opening database: %w", err)
 	}
 
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	db.SetMaxOpenConns(1)
+
+	if _, err := db.Exec(`
+		PRAGMA journal_mode=WAL;
+		PRAGMA synchronous=NORMAL;
+		PRAGMA busy_timeout=5000;
+	`); err != nil {
 		db.Close()
 		os.RemoveAll(tmpDir)
-		return nil, "", fmt.Errorf("enabling WAL mode: %w", err)
+		return nil, "", fmt.Errorf("setting pragmas: %w", err)
 	}
 
 	if err := createTables(db); err != nil {
