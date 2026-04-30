@@ -5,7 +5,7 @@
 - During the ingest phase, keep only one parsed blob in memory at a time — write structured fields to the database immediately.
 - Parse `olm.package`, `olm.channel`, and `olm.bundle` schemas during ingest; ignore unknown schemas.
 - Extract bundle version from the `olm.package` property on each `olm.bundle` blob using `blang/semver/v4`.
-- Define a `PackageSchemaHandler` interface that handlers implement per package schema type.
+- Define a `PackageSchemaHandler` interface (`Schema()` and `Normalize(ctx, tx, packageName)`) that handlers implement per package schema type. Each package's normalization receives its own `*sql.Tx`.
 - Register a handler for `olm.package` that knows its companion schemas (`olm.channel`, `olm.bundle`) and normalizes them.
 - During normalization, the `olm.package` handler validates semantic constraints: known references, no duplicates, all channel entries have corresponding bundle blobs.
 - During normalization, the `olm.package` handler computes successor edges from `replaces`, `skips`, and `skipRange` fields and writes them to the normalized `successors` table.

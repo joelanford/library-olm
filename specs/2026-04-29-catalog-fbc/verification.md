@@ -6,8 +6,8 @@
 - [ ] Bundle version is extracted from the `olm.package` property and parsed via `blang/semver/v4`.
 - [ ] SQLite schema has raw tables named by convention from FBC schema strings (raw_olm_package, raw_olm_channel, raw_olm_channel_entry, raw_olm_bundle) and normalized tables (graphs with self-referential parent_id, bundles, graph_bundles join table, successors).
 - [ ] Root graphs (packages) have NULL parent_id; child graphs (channels) reference their parent.
-- [ ] Bundles are deduplicated in the `bundles` table; `graph_bundles` is a many-to-many join.
-- [ ] `PackageSchemaHandler` interface is defined with `Schema()`, `CompanionSchemas()`, and `Normalize()` methods.
+- [ ] Bundles are deduplicated in the `bundles` table (id = bundle name); `graph_bundles` is a many-to-many join.
+- [ ] `PackageSchemaHandler` interface is defined with `Schema()` and `Normalize(ctx, *sql.Tx, packageName)` methods. Each package's normalization receives its own `*sql.Tx`.
 - [ ] An `olm.package` handler is registered and processes its neighborhood correctly.
 - [ ] The `olm.package` handler validates: known references, no duplicates, all channel entries have bundle blobs.
 - [ ] Validation errors are returned from `FromFS`, not deferred.

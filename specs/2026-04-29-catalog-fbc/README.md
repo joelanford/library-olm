@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 ---
 # Catalog FBC Implementation
 
@@ -15,8 +15,7 @@ Implement the `catalogv1.Catalog` interface for the File-Based Catalog (FBC) for
 
 > **Concurrency note:** Multiple goroutines will call into the same `*sql.DB` concurrently. Go's `database/sql` pool and SQLite's internal locking make this safe, but transaction strategy matters for performance — see the implementation plan for details.
 
-**Phase 2 — Normalize (per-package-schema):** Iterate over packages in the database. For each package, look up its schema (e.g. `olm.package`) and dispatch to a registered **package schema handler**. The handler:
-- Knows which companion schemas belong to its neighborhood (e.g. `olm.package` → `olm.channel`, `olm.bundle`, `olm.deprecations`)
+**Phase 2 — Normalize (per-package-schema):** Iterate over packages in the database. For each package, look up its schema (e.g. `olm.package`) and dispatch to a registered **package schema handler**. Each package's normalization runs in its own database transaction. The handler:
 - Validates the neighborhood (referential integrity, no duplicates, etc.)
 - Computes successor edges from format-specific upgrade semantics
 - Writes results into **normalized tables** that back the `catalogv1` query API
@@ -54,14 +53,11 @@ type PackageSchemaHandler interface {
     // Schema returns the package schema this handler processes (e.g. "olm.package").
     Schema() string
 
-    // CompanionSchemas returns the set of blob schemas that belong to this
-    // package schema's neighborhood (e.g. ["olm.channel", "olm.bundle"]).
-    CompanionSchemas() []string
-
     // Normalize validates the package's neighborhood in the raw tables
-    // and populates the normalized tables (bundles, channels/graphs,
-    // successor edges). Called once per package during phase 2.
-    Normalize(ctx context.Context, db *sql.DB, packageName string) error
+    // and populates the normalized tables (bundles, graphs, successor edges).
+    // Called once per package during the normalization phase.
+    // The transaction wraps a single package's normalization.
+    Normalize(ctx context.Context, tx *sql.Tx, packageName string) error
 }
 ```
 
@@ -87,7 +83,7 @@ The graph structure supports arbitrary nesting via a self-referential `graphs` t
 | Table | Columns | Purpose |
 |---|---|---|
 | `graphs` | id (PK), name, parent_id (FK nullable → graphs.id) | Recursive graph tree. Root graphs (packages) have NULL parent. Children (e.g. channels) reference their parent. |
-| `bundles` | id (PK), name, version, release | Bundle identity (deduplicated across graphs) |
+| `bundles` | id (PK; the bundle name), version, release | Bundle identity (deduplicated across graphs) |
 | `graph_bundles` | graph_id (FK → graphs.id), bundle_id (FK → bundles.id) | Many-to-many join: which bundles belong to which graphs |
 | `successors` | graph_id (FK → graphs.id), from_bundle_id (FK → bundles.id), to_bundle_id (FK → bundles.id) | Precomputed successor edges within a graph |
 
