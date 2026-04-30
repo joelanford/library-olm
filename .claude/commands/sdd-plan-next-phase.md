@@ -37,13 +37,11 @@ Otherwise, use AskUserQuestion to help the user decide:
 
 ### If refining an existing `idea` item (or a new item the user wants to refine now):
 
-Use AskUserQuestion iteratively to gather:
-- Detailed requirements
-- Implementation approach (referencing `specs/tech-stack.md` for tech choices and `specs/mission.md` for design principles)
-- Task breakdown with ordering
-- Verification steps and acceptance criteria
+Use AskUserQuestion iteratively to gather requirements, implementation approach, and verification criteria. Reference `specs/tech-stack.md` for tech choices and `specs/mission.md` for design principles throughout.
 
-Update the README.md to the full structure:
+When refined, update the spec directory to the full structure with four files:
+
+**README.md** — high-level summary and overview:
 ```markdown
 ---
 status: ready
@@ -53,19 +51,18 @@ status: ready
 ## Summary
 <What this work item delivers and why it matters.>
 
-## Requirements
+## Design
+<Key design decisions, type definitions, caller patterns, and how different
+implementations map to the API. This is the heart of the spec — it should
+be detailed enough that a reader understands the full shape of the work.>
+```
+
+**requirements.md** — functional requirements:
+```markdown
+# Requirements
+
 - <Requirement 1>
 - <Requirement 2>
-- ...
-
-## Implementation Plan
-1. <Task group 1>
-2. <Task group 2>
-3. ...
-
-## Verification
-- [ ] <Verification step 1>
-- [ ] <Verification step 2>
 - ...
 
 ## Acceptance Criteria
@@ -74,9 +71,34 @@ status: ready
 - ...
 ```
 
+**plan.md** — specific implementation plan:
+```markdown
+# Implementation Plan
+
+1. <Task group 1>
+2. <Task group 2>
+3. ...
+```
+
+**verification.md** — how to verify the implementation:
+```markdown
+# Verification
+
+## Implementation Correctness
+- [ ] <Verification that the implementation plan was followed correctly>
+- [ ] <Verification step 2>
+- ...
+
+## Project Conventions
+- [ ] <Check against specs/conventions.md>
+- [ ] <Check against specs/mission.md design principles>
+- [ ] <Check against specs/tech-stack.md>
+- ...
+```
+
 ## Step 5: Review
 
-After writing, re-read the spec and check:
+After writing, re-read all spec files and check:
 - Does the implementation plan align with `specs/mission.md` design principles?
 - Does it use the tech stack from `specs/tech-stack.md` correctly?
 - Are acceptance criteria testable and specific?

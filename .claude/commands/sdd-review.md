@@ -6,7 +6,7 @@ List all files changed on the current branch compared to the main branch. Read e
 
 ## Step 2: Find the work item spec
 
-Look for a `specs/YYYY-MM-DD-*/` directory with `status: in-progress`. If found, read its README.md for context on what the changes should accomplish.
+Look for a `specs/YYYY-MM-DD-*/` directory with `status: in-progress`. If found, read all files in the spec directory (README.md, requirements.md, plan.md, verification.md) for context on what the changes should accomplish.
 
 ## Step 3: Check correctness
 
@@ -20,7 +20,9 @@ For each changed file:
 
 ## Step 4: Check consistency with governing specs
 
-- Does the implementation match the requirements and acceptance criteria in the work item spec (if one exists)?
+- Does the implementation match the requirements and acceptance criteria in `requirements.md` (if one exists)?
+- Was `plan.md` followed correctly?
+- Do all checks in `verification.md` pass?
 - Is the code consistent with `specs/tech-stack.md` (correct dependencies, project structure)?
 - Do commit messages follow `specs/conventions.md`?
 - Does `CLAUDE.md` need updating to reflect new packages, commands, or conventions?

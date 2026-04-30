@@ -43,7 +43,16 @@ See `specs/conventions.md` for full details.
 
 ## Workflow Commands
 
-Work items live in `specs/YYYY-MM-DD-<slug>/README.md` with frontmatter status tracking (`idea` → `ready` → `in-progress` → `pr-submitted` → `done`).
+Work items live in `specs/YYYY-MM-DD-<slug>/` with frontmatter status tracking in README.md (`idea` → `ready` → `in-progress` → `pr-submitted` → `done`).
+
+Ideas have only a `README.md`. Refined work items have four files:
+
+| File | Purpose |
+|---|---|
+| `README.md` | High-level summary, design decisions, and status frontmatter |
+| `requirements.md` | Functional requirements and acceptance criteria |
+| `plan.md` | Specific implementation plan with ordered task groups |
+| `verification.md` | How to verify the implementation is correct and follows project conventions |
 
 | Command | Purpose |
 |---|---|
