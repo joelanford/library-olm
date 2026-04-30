@@ -7,7 +7,6 @@ import (
 	"iter"
 
 	"github.com/blang/semver/v4"
-
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
@@ -24,7 +23,7 @@ func (c *CatalogQuery) ListPackages(ctx context.Context) iter.Seq2[catalogv1.Upd
 			yield(nil, err)
 			return
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var id int64
 			var name string
@@ -80,7 +79,7 @@ func (g *CompositeUpdateGraphQuery) ListGraphs(ctx context.Context) iter.Seq2[ca
 			yield(nil, err)
 			return
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var id int64
 			var name string
@@ -141,7 +140,7 @@ func queryBundlesDirect(ctx context.Context, db *sql.DB, graphID int64) iter.Seq
 			yield(nil, err)
 			return
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		yieldBundleRows(rows, yield)
 	}
 }
@@ -163,7 +162,7 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, graphID int64) iter
 			yield(nil, err)
 			return
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		yieldBundleRows(rows, yield)
 	}
 }
@@ -185,7 +184,7 @@ func querySuccessorsDirect(ctx context.Context, db *sql.DB, graphID int64, from 
 			yield(nil, err)
 			return
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		yieldBundleRows(rows, yield)
 	}
 }
@@ -212,7 +211,7 @@ func querySuccessorsDescendant(ctx context.Context, db *sql.DB, graphID int64, f
 			yield(nil, err)
 			return
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		yieldBundleRows(rows, yield)
 	}
 }

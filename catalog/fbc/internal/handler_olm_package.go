@@ -56,7 +56,7 @@ func (h *OLMPackageHandler) validate(tx *sql.Tx, packageName string) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var missing []string
 	for rows.Next() {
@@ -85,7 +85,7 @@ func (h *OLMPackageHandler) validate(tx *sql.Tx, packageName string) error {
 	if err != nil {
 		return err
 	}
-	defer replRows.Close()
+	defer func() { _ = replRows.Close() }()
 
 	var badReplaces []string
 	for replRows.Next() {
@@ -118,7 +118,7 @@ func (h *OLMPackageHandler) insertBundles(tx *sql.Tx, packageName string) error 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var name, versionStr string
@@ -153,7 +153,7 @@ func (h *OLMPackageHandler) insertChannelGraphsAndEntries(tx *sql.Tx, packageNam
 	if err != nil {
 		return err
 	}
-	defer chRows.Close()
+	defer func() { _ = chRows.Close() }()
 
 	var channels []string
 	for chRows.Next() {
@@ -195,7 +195,7 @@ func (h *OLMPackageHandler) computeSuccessors(tx *sql.Tx, packageName string, pk
 	if err != nil {
 		return err
 	}
-	defer chRows.Close()
+	defer func() { _ = chRows.Close() }()
 
 	type channelInfo struct {
 		id   int64
@@ -229,7 +229,7 @@ func (h *OLMPackageHandler) computeChannelSuccessors(tx *sql.Tx, packageName str
 	if err != nil {
 		return err
 	}
-	defer entryRows.Close()
+	defer func() { _ = entryRows.Close() }()
 
 	type entry struct {
 		name      string
@@ -307,7 +307,7 @@ func (h *OLMPackageHandler) computeSkipRangeSuccessors(tx *sql.Tx, chGraphID int
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var fromID int64

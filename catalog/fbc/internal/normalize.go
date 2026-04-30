@@ -11,7 +11,7 @@ func Normalize(ctx context.Context, db *sql.DB, registry *HandlerRegistry) error
 	if err != nil {
 		return fmt.Errorf("listing packages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var packages []string
 	for rows.Next() {
@@ -37,7 +37,7 @@ func Normalize(ctx context.Context, db *sql.DB, registry *HandlerRegistry) error
 		}
 
 		if err := handler.Normalize(ctx, tx, pkgName); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("normalize package %q: %w", pkgName, err)
 		}
 

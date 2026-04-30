@@ -137,7 +137,7 @@ func batchWriter(ctx context.Context, db *sql.DB, rowCh <-chan ingestRow) error 
 		}
 		for _, fn := range batch {
 			if err := fn(tx); err != nil {
-				tx.Rollback()
+				_ = tx.Rollback()
 				return err
 			}
 		}

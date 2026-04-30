@@ -34,7 +34,7 @@ func FromFS(ctx context.Context, fsys fs.FS) (*Catalog, error) {
 	}
 
 	if err := internal.Ingest(ctx, db, fsys); err != nil {
-		internal.CloseDB(db, tmpDir)
+		_ = internal.CloseDB(db, tmpDir)
 		return nil, fmt.Errorf("ingest: %w", err)
 	}
 
@@ -42,7 +42,7 @@ func FromFS(ctx context.Context, fsys fs.FS) (*Catalog, error) {
 	registry.Register(&internal.OLMPackageHandler{})
 
 	if err := internal.Normalize(ctx, db, registry); err != nil {
-		internal.CloseDB(db, tmpDir)
+		_ = internal.CloseDB(db, tmpDir)
 		return nil, fmt.Errorf("normalize: %w", err)
 	}
 

@@ -18,7 +18,7 @@ func OpenDB() (*sql.DB, string, error) {
 	dbPath := filepath.Join(tmpDir, "catalog.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return nil, "", fmt.Errorf("opening database: %w", err)
 	}
 
@@ -29,14 +29,14 @@ func OpenDB() (*sql.DB, string, error) {
 		PRAGMA synchronous=NORMAL;
 		PRAGMA busy_timeout=5000;
 	`); err != nil {
-		db.Close()
-		os.RemoveAll(tmpDir)
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
 		return nil, "", fmt.Errorf("setting pragmas: %w", err)
 	}
 
 	if err := createTables(db); err != nil {
-		db.Close()
-		os.RemoveAll(tmpDir)
+		_ = db.Close()
+		_ = os.RemoveAll(tmpDir)
 		return nil, "", fmt.Errorf("creating tables: %w", err)
 	}
 
