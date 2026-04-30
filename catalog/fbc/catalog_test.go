@@ -147,6 +147,251 @@ func TestFromFS_SkipRange(t *testing.T) {
 	assert.Equal(t, []string{"skip-operator.v2.0.0"}, names)
 }
 
+func TestFromFS_SkipsWithPhantomBundle(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("skip-op") +
+				fbcChannel("skip-op", "stable", `[{"name":"skip-op.v1.0.0"},{"name":"skip-op.v2.0.0","skips":["skip-op.v0.9.0"]}]`) +
+				fbcBundle("skip-op", "skip-op.v1.0.0", "1.0.0") +
+				fbcBundle("skip-op", "skip-op.v2.0.0", "2.0.0"),
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	pkg, err := cat.GetPackage(ctx, "skip-op")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+	ch, err := composite.GetGraph(ctx, "stable")
+	require.NoError(t, err)
+
+	from := bundlev1.NameVersionRelease{BundleName: "skip-op.v0.9.0"}
+	names := collectBundleNames(t, ch.Successors(ctx, from))
+	assert.Equal(t, []string{"skip-op.v2.0.0"}, names)
+}
+
+func TestFromFS_DanglingReplaces(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("repl-op") +
+				fbcChannel("repl-op", "stable", `[{"name":"repl-op.v1.0.0","replaces":"repl-op.v0.1.0"}]`) +
+				fbcBundle("repl-op", "repl-op.v1.0.0", "1.0.0"),
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	pkg, err := cat.GetPackage(ctx, "repl-op")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+	ch, err := composite.GetGraph(ctx, "stable")
+	require.NoError(t, err)
+
+	from := bundlev1.NameVersionRelease{BundleName: "repl-op.v0.1.0"}
+	names := collectBundleNames(t, ch.Successors(ctx, from))
+	assert.Equal(t, []string{"repl-op.v1.0.0"}, names)
+}
+
+func TestFromFS_MultiplePackages(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("alpha-op") +
+				fbcChannel("alpha-op", "stable", `[{"name":"alpha-op.v1.0.0"}]`) +
+				fbcBundle("alpha-op", "alpha-op.v1.0.0", "1.0.0") +
+				fbcPackage("beta-op") +
+				fbcChannel("beta-op", "stable", `[{"name":"beta-op.v2.0.0"}]`) +
+				fbcBundle("beta-op", "beta-op.v2.0.0", "2.0.0"),
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	var names []string
+	for pkg, err := range cat.ListPackages(ctx) {
+		require.NoError(t, err)
+		names = append(names, pkg.Name())
+	}
+	slices.Sort(names)
+	assert.Equal(t, []string{"alpha-op", "beta-op"}, names)
+
+	alphaPkg, err := cat.GetPackage(ctx, "alpha-op")
+	require.NoError(t, err)
+	alphaNames := collectBundleNames(t, alphaPkg.(catalogv1.CompositeUpdateGraph).ListBundles(ctx))
+	assert.Equal(t, []string{"alpha-op.v1.0.0"}, alphaNames)
+
+	betaPkg, err := cat.GetPackage(ctx, "beta-op")
+	require.NoError(t, err)
+	betaNames := collectBundleNames(t, betaPkg.(catalogv1.CompositeUpdateGraph).ListBundles(ctx))
+	assert.Equal(t, []string{"beta-op.v2.0.0"}, betaNames)
+}
+
+func TestFromFS_UnknownSchemasIgnored(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("my-op") +
+				`{"schema":"olm.custom.thing","package":"my-op","name":"whatever"}` + "\n" +
+				fbcChannel("my-op", "stable", `[{"name":"my-op.v1.0.0"}]`) +
+				fbcBundle("my-op", "my-op.v1.0.0", "1.0.0"),
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	pkg, err := cat.GetPackage(ctx, "my-op")
+	require.NoError(t, err)
+	assert.Equal(t, "my-op", pkg.Name())
+}
+
+func TestFromFS_InvalidSkipRange(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("bad-op") +
+				fbcChannel("bad-op", "stable", `[{"name":"bad-op.v1.0.0"},{"name":"bad-op.v2.0.0","skipRange":"<=v1.0.0"}]`) +
+				fbcBundle("bad-op", "bad-op.v1.0.0", "1.0.0") +
+				fbcBundle("bad-op", "bad-op.v2.0.0", "2.0.0"),
+		)},
+	}
+	ctx := context.Background()
+	_, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "skipRange")
+}
+
+func TestFromFS_PreReleaseVersion(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("pre-op") +
+				fbcChannel("pre-op", "stable", `[{"name":"pre-op.v1.0.0-rc1"},{"name":"pre-op.v1.0.0","skipRange":">=0.9.0 <1.0.0"}]`) +
+				fbcBundle("pre-op", "pre-op.v1.0.0-rc1", "1.0.0-rc1") +
+				fbcBundle("pre-op", "pre-op.v1.0.0", "1.0.0"),
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	pkg, err := cat.GetPackage(ctx, "pre-op")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+	ch, err := composite.GetGraph(ctx, "stable")
+	require.NoError(t, err)
+
+	// Check pre-release bundle identity
+	var rcBundle bundlev1.Bundle
+	for b, err := range ch.ListBundles(ctx) {
+		require.NoError(t, err)
+		if b.Name() == "pre-op.v1.0.0-rc1" {
+			rcBundle = b
+		}
+	}
+	require.NotNil(t, rcBundle)
+	vr := rcBundle.VersionRelease()
+	assert.Equal(t, "1.0.0-rc1", vr.Version.String())
+	assert.True(t, vr.Release.IsEmpty())
+
+	// skipRange ">=0.9.0 <1.0.0" should match 1.0.0-rc1 (since 1.0.0-rc1 < 1.0.0 in semver)
+	from := bundlev1.NameVersionRelease{BundleName: "pre-op.v1.0.0-rc1", Version: semver.MustParse("1.0.0-rc1")}
+	names := collectBundleNames(t, ch.Successors(ctx, from))
+	assert.Equal(t, []string{"pre-op.v1.0.0"}, names)
+}
+
+func TestFromFS_BundleWithRelease(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("rel-op") +
+				fbcChannel("rel-op", "stable", `[{"name":"rel-op.v1.0.0"}]`) +
+				fbcBundleWithRelease("rel-op", "rel-op.v1.0.0", "1.0.0", "rc1"),
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	pkg, err := cat.GetPackage(ctx, "rel-op")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+
+	var found bundlev1.Bundle
+	for b, err := range composite.ListBundles(ctx) {
+		require.NoError(t, err)
+		found = b
+	}
+	require.NotNil(t, found)
+	vr := found.VersionRelease()
+	assert.Equal(t, "1.0.0", vr.Version.String())
+	assert.Equal(t, "rc1", vr.Release.String())
+}
+
+func TestFromFS_InvalidBundleRelease(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("bad-rel") +
+				fbcChannel("bad-rel", "stable", `[{"name":"bad-rel.v1.0.0"}]`) +
+				fbcBundleWithRelease("bad-rel", "bad-rel.v1.0.0", "1.0.0", "rc@1"),
+		)},
+	}
+	ctx := context.Background()
+	_, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "release")
+}
+
+func TestFromFS_MissingPackageProperty(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("no-prop") +
+				fbcChannel("no-prop", "stable", `[{"name":"no-prop.v1.0.0"}]`) +
+				"{\"schema\":\"olm.bundle\",\"package\":\"no-prop\",\"name\":\"no-prop.v1.0.0\",\"properties\":[]}\n",
+		)},
+	}
+	ctx := context.Background()
+	_, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "olm.package")
+}
+
+func TestFromFS_InvalidBundleVersion(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("bad-ver") +
+				fbcChannel("bad-ver", "stable", `[{"name":"bad-ver.v1.0.0"}]`) +
+				fbcBundle("bad-ver", "bad-ver.v1.0.0", "not-semver"),
+		)},
+	}
+	ctx := context.Background()
+	_, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "version")
+}
+
+func TestFromFS_SuccessorsUnknownBundle(t *testing.T) {
+	fsys := validCatalogFS()
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	pkg, err := cat.GetPackage(ctx, "my-operator")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+	ch, err := composite.GetGraph(ctx, "stable")
+	require.NoError(t, err)
+
+	from := bundlev1.NameVersionRelease{BundleName: "nonexistent.v9.9.9", Version: semver.MustParse("9.9.9")}
+	names := collectBundleNames(t, ch.Successors(ctx, from))
+	assert.Empty(t, names)
+}
+
 func TestFromFS_MissingBundle(t *testing.T) {
 	fsys := fstest.MapFS{
 		"catalog.json": &fstest.MapFile{Data: []byte(
@@ -232,4 +477,9 @@ func fbcChannel(pkg, name, entries string) string {
 func fbcBundle(pkg, name, version string) string {
 	return fmt.Sprintf("{\"schema\":\"olm.bundle\",\"package\":\"%s\",\"name\":\"%s\",\"properties\":[{\"type\":\"olm.package\",\"value\":{\"packageName\":\"%s\",\"version\":\"%s\"}}]}\n",
 		pkg, name, pkg, version)
+}
+
+func fbcBundleWithRelease(pkg, name, version, release string) string {
+	return fmt.Sprintf("{\"schema\":\"olm.bundle\",\"package\":\"%s\",\"name\":\"%s\",\"properties\":[{\"type\":\"olm.package\",\"value\":{\"packageName\":\"%s\",\"version\":\"%s\",\"release\":\"%s\"}}]}\n",
+		pkg, name, pkg, version, release)
 }

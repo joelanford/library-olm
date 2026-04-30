@@ -85,6 +85,7 @@ CREATE TABLE raw_olm_bundle (
     name         TEXT NOT NULL,
     package_name TEXT NOT NULL,
     version      TEXT NOT NULL,
+    release      TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (package_name, name)
 );
 
@@ -99,16 +100,14 @@ CREATE TABLE graphs (
 );
 
 CREATE TABLE bundles (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    name    TEXT NOT NULL,
-    version TEXT NOT NULL,
-    release TEXT NOT NULL DEFAULT '',
-    UNIQUE (name, version, release)
+    id      TEXT NOT NULL PRIMARY KEY,
+    version TEXT NOT NULL DEFAULT '',
+    release TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE graph_bundles (
     graph_id  INTEGER NOT NULL,
-    bundle_id INTEGER NOT NULL,
+    bundle_id TEXT NOT NULL,
     PRIMARY KEY (graph_id, bundle_id),
     FOREIGN KEY (graph_id) REFERENCES graphs(id),
     FOREIGN KEY (bundle_id) REFERENCES bundles(id)
@@ -116,8 +115,8 @@ CREATE TABLE graph_bundles (
 
 CREATE TABLE successors (
     graph_id       INTEGER NOT NULL,
-    from_bundle_id INTEGER NOT NULL,
-    to_bundle_id   INTEGER NOT NULL,
+    from_bundle_id TEXT NOT NULL,
+    to_bundle_id   TEXT NOT NULL,
     PRIMARY KEY (graph_id, from_bundle_id, to_bundle_id),
     FOREIGN KEY (graph_id) REFERENCES graphs(id),
     FOREIGN KEY (from_bundle_id) REFERENCES bundles(id),

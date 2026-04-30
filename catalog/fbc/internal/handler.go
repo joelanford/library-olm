@@ -12,10 +12,6 @@ type PackageSchemaHandler interface {
 	// Schema returns the package schema this handler processes (e.g. "olm.package").
 	Schema() string
 
-	// CompanionSchemas returns the set of blob schemas that belong to this
-	// package schema's neighborhood (e.g. ["olm.channel", "olm.bundle"]).
-	CompanionSchemas() []string
-
 	// Normalize validates the package's neighborhood in the raw tables
 	// and populates the normalized tables (bundles, graphs, successor edges).
 	// Called once per package during the normalization phase.

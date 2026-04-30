@@ -7,16 +7,13 @@ import (
 	"strings"
 
 	"github.com/blang/semver/v4"
+	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	"github.com/operator-framework/operator-registry/alpha/declcfg"
 )
 
 type OLMPackageHandler struct{}
 
 func (h *OLMPackageHandler) Schema() string { return declcfg.SchemaPackage }
-
-func (h *OLMPackageHandler) CompanionSchemas() []string {
-	return []string{declcfg.SchemaChannel, declcfg.SchemaBundle}
-}
 
 func (h *OLMPackageHandler) Normalize(ctx context.Context, tx *sql.Tx, packageName string) error {
 	if err := h.validate(tx, packageName); err != nil {
@@ -44,7 +41,6 @@ func (h *OLMPackageHandler) Normalize(ctx context.Context, tx *sql.Tx, packageNa
 }
 
 func (h *OLMPackageHandler) validate(tx *sql.Tx, packageName string) error {
-	// Check channels reference this package (enforced by PK, but verify entries)
 	rows, err := tx.Query(`
 		SELECT ce.channel_name, ce.bundle_name
 		FROM raw_olm_channel_entry ce
@@ -72,36 +68,6 @@ func (h *OLMPackageHandler) validate(tx *sql.Tx, packageName string) error {
 	if len(missing) > 0 {
 		return fmt.Errorf("channel entries reference unknown bundles: %s", strings.Join(missing, ", "))
 	}
-
-	// Check replaces targets exist as bundles
-	replRows, err := tx.Query(`
-		SELECT ce.channel_name, ce.bundle_name, ce.replaces
-		FROM raw_olm_channel_entry ce
-		WHERE ce.package_name = ? AND ce.replaces != ''
-		  AND NOT EXISTS (
-		    SELECT 1 FROM raw_olm_bundle b
-		    WHERE b.package_name = ce.package_name AND b.name = ce.replaces
-		  )`, packageName)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = replRows.Close() }()
-
-	var badReplaces []string
-	for replRows.Next() {
-		var chName, bName, replaces string
-		if err := replRows.Scan(&chName, &bName, &replaces); err != nil {
-			return err
-		}
-		badReplaces = append(badReplaces, fmt.Sprintf("channel %q: %q replaces unknown %q", chName, bName, replaces))
-	}
-	if err := replRows.Err(); err != nil {
-		return err
-	}
-	if len(badReplaces) > 0 {
-		return fmt.Errorf("replaces references unknown bundles: %s", strings.Join(badReplaces, ", "))
-	}
-
 	return nil
 }
 
@@ -114,33 +80,28 @@ func (h *OLMPackageHandler) insertPackageGraph(tx *sql.Tx, packageName string) (
 }
 
 func (h *OLMPackageHandler) insertBundles(tx *sql.Tx, packageName string) error {
-	rows, err := tx.Query("SELECT name, version FROM raw_olm_bundle WHERE package_name = ?", packageName)
+	rows, err := tx.Query("SELECT name, version, release FROM raw_olm_bundle WHERE package_name = ?", packageName)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
-		var name, versionStr string
-		if err := rows.Scan(&name, &versionStr); err != nil {
+		var name, versionStr, releaseStr string
+		if err := rows.Scan(&name, &versionStr, &releaseStr); err != nil {
 			return err
 		}
-		ver, err := semver.Parse(versionStr)
-		if err != nil {
+		if _, err := semver.Parse(versionStr); err != nil {
 			return fmt.Errorf("parse version %q for bundle %q: %w", versionStr, name, err)
 		}
-		releaseStr := ""
-		if len(ver.Pre) > 0 {
-			parts := make([]string, len(ver.Pre))
-			for i, p := range ver.Pre {
-				parts[i] = p.String()
+		if releaseStr != "" {
+			if _, err := bundlev1.ParseRelease(releaseStr); err != nil {
+				return fmt.Errorf("parse release %q for bundle %q: %w", releaseStr, name, err)
 			}
-			releaseStr = strings.Join(parts, ".")
 		}
-		versionOnly := semver.Version{Major: ver.Major, Minor: ver.Minor, Patch: ver.Patch}
 		if _, err := tx.Exec(
-			"INSERT OR IGNORE INTO bundles (name, version, release) VALUES (?, ?, ?)",
-			name, versionOnly.String(), releaseStr,
+			"INSERT OR IGNORE INTO bundles (id, version, release) VALUES (?, ?, ?)",
+			name, versionStr, releaseStr,
 		); err != nil {
 			return err
 		}
@@ -179,9 +140,8 @@ func (h *OLMPackageHandler) insertChannelGraphsAndEntries(tx *sql.Tx, packageNam
 
 		if _, err := tx.Exec(`
 			INSERT INTO graph_bundles (graph_id, bundle_id)
-			SELECT ?, b.id
+			SELECT ?, ce.bundle_name
 			FROM raw_olm_channel_entry ce
-			JOIN bundles b ON b.name = ce.bundle_name
 			WHERE ce.package_name = ? AND ce.channel_name = ?`,
 			chGraphID, packageName, chName); err != nil {
 			return fmt.Errorf("insert graph_bundles for channel %q: %w", chName, err)
@@ -255,36 +215,29 @@ func (h *OLMPackageHandler) computeChannelSuccessors(tx *sql.Tx, packageName str
 	}
 
 	for _, e := range entries {
-		toBundleID, err := h.lookupBundleID(tx, e.name)
-		if err != nil {
-			return fmt.Errorf("lookup bundle %q: %w", e.name, err)
-		}
-
-		// replaces edge
+		// replaces edge: from the replaced bundle to this one
 		if e.replaces != "" {
-			fromBundleID, err := h.lookupBundleID(tx, e.replaces)
-			if err != nil {
-				return fmt.Errorf("lookup replaces target %q: %w", e.replaces, err)
+			if err := h.ensurePhantomBundle(tx, e.replaces); err != nil {
+				return err
 			}
-			if err := h.insertSuccessor(tx, chGraphID, fromBundleID, toBundleID); err != nil {
+			if err := h.insertSuccessor(tx, chGraphID, e.replaces, e.name); err != nil {
 				return err
 			}
 		}
 
-		// skips edges
+		// skips edges: from each skipped bundle to this one
 		for _, skip := range e.skips {
-			fromBundleID, err := h.lookupBundleID(tx, skip)
-			if err != nil {
-				return fmt.Errorf("lookup skips target %q: %w", skip, err)
+			if err := h.ensurePhantomBundle(tx, skip); err != nil {
+				return err
 			}
-			if err := h.insertSuccessor(tx, chGraphID, fromBundleID, toBundleID); err != nil {
+			if err := h.insertSuccessor(tx, chGraphID, skip, e.name); err != nil {
 				return err
 			}
 		}
 
-		// skipRange edges
+		// skipRange edges: from every bundle in the channel whose version matches the range
 		if e.skipRange != "" {
-			if err := h.computeSkipRangeSuccessors(tx, chGraphID, e.name, toBundleID, e.skipRange); err != nil {
+			if err := h.computeSkipRangeSuccessors(tx, chGraphID, e.name, e.skipRange); err != nil {
 				return fmt.Errorf("skipRange for %q: %w", e.name, err)
 			}
 		}
@@ -292,47 +245,38 @@ func (h *OLMPackageHandler) computeChannelSuccessors(tx *sql.Tx, packageName str
 	return nil
 }
 
-func (h *OLMPackageHandler) computeSkipRangeSuccessors(tx *sql.Tx, chGraphID int64, bundleName string, toBundleID int64, skipRangeStr string) error {
+func (h *OLMPackageHandler) ensurePhantomBundle(tx *sql.Tx, bundleName string) error {
+	_, err := tx.Exec("INSERT OR IGNORE INTO bundles (id) VALUES (?)", bundleName)
+	return err
+}
+
+func (h *OLMPackageHandler) computeSkipRangeSuccessors(tx *sql.Tx, chGraphID int64, bundleName string, skipRangeStr string) error {
 	rng, err := semver.ParseRange(skipRangeStr)
 	if err != nil {
 		return fmt.Errorf("parse skipRange %q: %w", skipRangeStr, err)
 	}
 
-	// Get all bundles in this channel with their versions
 	rows, err := tx.Query(`
-		SELECT b.id, b.version, b.release
+		SELECT b.id, b.version
 		FROM graph_bundles gb
 		JOIN bundles b ON b.id = gb.bundle_id
-		WHERE gb.graph_id = ? AND b.name != ?`, chGraphID, bundleName)
+		WHERE gb.graph_id = ? AND b.id != ? AND b.version != ''`, chGraphID, bundleName)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
-		var fromID int64
-		var versionStr, releaseStr string
-		if err := rows.Scan(&fromID, &versionStr, &releaseStr); err != nil {
+		var name, versionStr string
+		if err := rows.Scan(&name, &versionStr); err != nil {
 			return err
 		}
 		ver, err := semver.Parse(versionStr)
 		if err != nil {
 			continue
 		}
-		if releaseStr != "" {
-			parts := strings.Split(releaseStr, ".")
-			pre := make([]semver.PRVersion, len(parts))
-			for i, p := range parts {
-				pr, err := semver.NewPRVersion(p)
-				if err != nil {
-					continue
-				}
-				pre[i] = pr
-			}
-			ver.Pre = pre
-		}
 		if rng(ver) {
-			if err := h.insertSuccessor(tx, chGraphID, fromID, toBundleID); err != nil {
+			if err := h.insertSuccessor(tx, chGraphID, name, bundleName); err != nil {
 				return err
 			}
 		}
@@ -340,16 +284,7 @@ func (h *OLMPackageHandler) computeSkipRangeSuccessors(tx *sql.Tx, chGraphID int
 	return rows.Err()
 }
 
-func (h *OLMPackageHandler) lookupBundleID(tx *sql.Tx, bundleName string) (int64, error) {
-	var id int64
-	err := tx.QueryRow("SELECT id FROM bundles WHERE name = ?", bundleName).Scan(&id)
-	if err != nil {
-		return 0, fmt.Errorf("bundle %q not found in normalized bundles table", bundleName)
-	}
-	return id, nil
-}
-
-func (h *OLMPackageHandler) insertSuccessor(tx *sql.Tx, graphID, fromBundleID, toBundleID int64) error {
+func (h *OLMPackageHandler) insertSuccessor(tx *sql.Tx, graphID int64, fromBundleID, toBundleID string) error {
 	_, err := tx.Exec(
 		"INSERT OR IGNORE INTO successors (graph_id, from_bundle_id, to_bundle_id) VALUES (?, ?, ?)",
 		graphID, fromBundleID, toBundleID)

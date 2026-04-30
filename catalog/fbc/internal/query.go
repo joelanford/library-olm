@@ -131,11 +131,11 @@ func (g *UpdateGraphQuery) Successors(ctx context.Context, from bundlev1.Bundle)
 func queryBundlesDirect(ctx context.Context, db *sql.DB, graphID int64) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
 		rows, err := db.QueryContext(ctx, `
-			SELECT b.name, b.version, b.release
+			SELECT b.id, b.version, b.release
 			FROM graph_bundles gb
 			JOIN bundles b ON b.id = gb.bundle_id
-			WHERE gb.graph_id = ?
-			ORDER BY b.name, b.version`, graphID)
+			WHERE gb.graph_id = ? AND b.version != ''
+			ORDER BY b.id`, graphID)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -153,11 +153,11 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, graphID int64) iter
 				UNION ALL
 				SELECT g.id FROM graphs g JOIN descendants d ON g.parent_id = d.id
 			)
-			SELECT DISTINCT b.name, b.version, b.release
+			SELECT DISTINCT b.id, b.version, b.release
 			FROM graph_bundles gb
 			JOIN bundles b ON b.id = gb.bundle_id
-			WHERE gb.graph_id IN (SELECT id FROM descendants)
-			ORDER BY b.name, b.version`, graphID)
+			WHERE gb.graph_id IN (SELECT id FROM descendants) AND b.version != ''
+			ORDER BY b.id`, graphID)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -169,17 +169,12 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, graphID int64) iter
 
 func querySuccessorsDirect(ctx context.Context, db *sql.DB, graphID int64, from bundlev1.Bundle) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
-		fromID, err := lookupBundleIDByIdentity(ctx, db, from)
-		if err != nil {
-			yield(nil, err)
-			return
-		}
 		rows, err := db.QueryContext(ctx, `
-			SELECT b.name, b.version, b.release
+			SELECT b.id, b.version, b.release
 			FROM successors s
 			JOIN bundles b ON b.id = s.to_bundle_id
 			WHERE s.graph_id = ? AND s.from_bundle_id = ?
-			ORDER BY b.name, b.version`, graphID, fromID)
+			ORDER BY b.id`, graphID, from.Name())
 		if err != nil {
 			yield(nil, err)
 			return
@@ -191,22 +186,17 @@ func querySuccessorsDirect(ctx context.Context, db *sql.DB, graphID int64, from 
 
 func querySuccessorsDescendant(ctx context.Context, db *sql.DB, graphID int64, from bundlev1.Bundle) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
-		fromID, err := lookupBundleIDByIdentity(ctx, db, from)
-		if err != nil {
-			yield(nil, err)
-			return
-		}
 		rows, err := db.QueryContext(ctx, `
 			WITH RECURSIVE descendants(id) AS (
 				SELECT id FROM graphs WHERE parent_id = ?
 				UNION ALL
 				SELECT g.id FROM graphs g JOIN descendants d ON g.parent_id = d.id
 			)
-			SELECT DISTINCT b.name, b.version, b.release
+			SELECT DISTINCT b.id, b.version, b.release
 			FROM successors s
 			JOIN bundles b ON b.id = s.to_bundle_id
 			WHERE s.graph_id IN (SELECT id FROM descendants) AND s.from_bundle_id = ?
-			ORDER BY b.name, b.version`, graphID, fromID)
+			ORDER BY b.id`, graphID, from.Name())
 		if err != nil {
 			yield(nil, err)
 			return
@@ -225,12 +215,16 @@ func yieldBundleRows(rows *sql.Rows, yield func(bundlev1.Bundle, error) bool) {
 			}
 			continue
 		}
-		ver, err := semver.Parse(versionStr)
-		if err != nil {
-			if !yield(nil, fmt.Errorf("parse version %q: %w", versionStr, err)) {
-				return
+		var ver semver.Version
+		if versionStr != "" {
+			var err error
+			ver, err = semver.Parse(versionStr)
+			if err != nil {
+				if !yield(nil, fmt.Errorf("parse version %q: %w", versionStr, err)) {
+					return
+				}
+				continue
 			}
-			continue
 		}
 		rel := bundlev1.MustParseRelease(releaseStr)
 		b := bundlev1.NameVersionRelease{BundleName: name, Version: ver, Release: rel}
@@ -241,16 +235,4 @@ func yieldBundleRows(rows *sql.Rows, yield func(bundlev1.Bundle, error) bool) {
 	if err := rows.Err(); err != nil {
 		yield(nil, err)
 	}
-}
-
-func lookupBundleIDByIdentity(ctx context.Context, db *sql.DB, b bundlev1.Bundle) (int64, error) {
-	vr := b.VersionRelease()
-	var id int64
-	err := db.QueryRowContext(ctx,
-		"SELECT id FROM bundles WHERE name = ? AND version = ? AND release = ?",
-		b.Name(), vr.Version.String(), vr.Release.String()).Scan(&id)
-	if err == sql.ErrNoRows {
-		return 0, fmt.Errorf("bundle %q (version %s, release %s) not found", b.Name(), vr.Version, vr.Release)
-	}
-	return id, err
 }

@@ -94,13 +94,13 @@ func metaToInsert(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
 		if err := json.Unmarshal(meta.Blob, &b); err != nil {
 			return nil, fmt.Errorf("parse bundle: %w", err)
 		}
-		version, err := extractBundleVersion(b)
+		version, release, err := extractBundleVersionRelease(b)
 		if err != nil {
 			return nil, err
 		}
 		return func(tx *sql.Tx) error {
-			_, err := tx.Exec("INSERT INTO raw_olm_bundle (name, package_name, version) VALUES (?, ?, ?)",
-				b.Name, b.Package, version)
+			_, err := tx.Exec("INSERT INTO raw_olm_bundle (name, package_name, version, release) VALUES (?, ?, ?, ?)",
+				b.Name, b.Package, version, release)
 			return err
 		}, nil
 
@@ -109,18 +109,18 @@ func metaToInsert(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
 	}
 }
 
-func extractBundleVersion(b declcfg.Bundle) (string, error) {
+func extractBundleVersionRelease(b declcfg.Bundle) (string, string, error) {
 	for _, prop := range b.Properties {
 		if prop.Type != property.TypePackage {
 			continue
 		}
 		var pkg property.Package
 		if err := json.Unmarshal(prop.Value, &pkg); err != nil {
-			return "", fmt.Errorf("parse %s property for bundle %q: %w", property.TypePackage, b.Name, err)
+			return "", "", fmt.Errorf("parse %s property for bundle %q: %w", property.TypePackage, b.Name, err)
 		}
-		return pkg.Version, nil
+		return pkg.Version, pkg.Release, nil
 	}
-	return "", fmt.Errorf("bundle %q has no %s property", b.Name, property.TypePackage)
+	return "", "", fmt.Errorf("bundle %q has no %s property", b.Name, property.TypePackage)
 }
 
 const batchSize = 500
