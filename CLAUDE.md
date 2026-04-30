@@ -10,6 +10,7 @@ bundle/              — bundle types and transformations
   registry/v1/       — registry+v1 bundle parsing (FromFS) and rendering (ToPlainManifests)
 catalog/             — catalog API, formats, querying, and indexing
   v1/                — catalog interfaces (UpdateGraph, CompositeUpdateGraph, Catalog)
+  fbc/               — FBC catalog implementation (FromFS → SQLite-backed Catalog)
 image/               — OCI registry access and content unpacking
   bundle/            — bundle image handlers (registry+v1, Helm)
   catalog/           — catalog image handlers (FBC)

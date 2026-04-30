@@ -19,6 +19,7 @@
 | `github.com/santhosh-tekuri/jsonschema/v6` | JSON schema validation |
 | `github.com/Masterminds/semver/v3` | Semantic version parsing and comparison |
 | `github.com/blang/semver/v4` | Semantic version parsing (secondary) |
+| `modernc.org/sqlite` | Pure-Go SQLite driver for catalog indexing |
 | `golang.org/x/sync` | Concurrency utilities |
 
 ### Legacy Dependencies (minimize usage)
@@ -44,8 +45,8 @@ bundle/                          — bundle types and transformations
   versionrelease.go              — version/release utilities
 catalog/                         — catalog API, formats, and querying
   v1/                            — catalog interfaces (UpdateGraph, CompositeUpdateGraph, Catalog)
-  fbc/                           — file-based catalog format support
-  sqlite/                        — SQLite catalog backend
+  fbc/                           — FBC catalog implementation (public: Catalog, FromFS, Close)
+    internal/                    — SQLite schema, ingest, handler dispatch, query types
 image/                           — OCI registry access and content unpacking
   bundle/                        — bundle image handlers (registry+v1, Helm)
   catalog/                       — catalog image handlers (FBC)
