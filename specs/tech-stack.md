@@ -38,16 +38,18 @@
 
 ```
 bundle/                          — bundle types and transformations
+  v1/                            — bundle identity types (Release, VersionRelease, Bundle interface)
   registry/v1/                   — registry+v1 bundle parsing and rendering
     internal/                    — implementation details (render, validate, config)
   versionrelease.go              — version/release utilities
+catalog/                         — catalog API, formats, and querying
+  v1/                            — catalog interfaces (UpdateGraph, CompositeUpdateGraph, Catalog)
+  fbc/                           — file-based catalog format support
+  sqlite/                        — SQLite catalog backend
 image/                           — OCI registry access and content unpacking
   bundle/                        — bundle image handlers (registry+v1, Helm)
   catalog/                       — catalog image handlers (FBC)
   internal/                      — shared image test infrastructure
-catalog/                         — catalog API, formats, and querying
-  fbc/                           — file-based catalog format support
-  sqlite/                        — SQLite catalog backend
 resolver/                        — bundle resolution from catalogs
 specs/                           — project specs and work items
 ```

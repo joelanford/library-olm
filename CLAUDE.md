@@ -6,11 +6,13 @@ Go library providing reusable building blocks for OLM's core functionality: bund
 
 ```
 bundle/              — bundle types and transformations
+  v1/                — bundle identity types (Release, VersionRelease, Bundle interface)
   registry/v1/       — registry+v1 bundle parsing (FromFS) and rendering (ToPlainManifests)
+catalog/             — catalog API, formats, querying, and indexing
+  v1/                — catalog interfaces (UpdateGraph, CompositeUpdateGraph, Catalog)
 image/               — OCI registry access and content unpacking
   bundle/            — bundle image handlers (registry+v1, Helm)
   catalog/           — catalog image handlers (FBC)
-catalog/             — catalog API, formats, querying, and indexing
 resolver/            — bundle resolution from catalogs
 ```
 
