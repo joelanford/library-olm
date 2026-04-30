@@ -3,6 +3,7 @@ module github.com/joelanford/library-olm
 go 1.25.7
 
 require (
+	github.com/blang/semver/v4 v4.0.0
 	github.com/cert-manager/cert-manager v1.20.0
 	github.com/containerd/containerd v1.7.30
 	github.com/google/renameio/v2 v2.0.2
@@ -65,7 +66,6 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bkielbasa/cyclop v1.2.3 // indirect
-	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/blizzy78/varnamelen v0.8.0 // indirect
 	github.com/bombsimon/wsl/v4 v4.7.0 // indirect
 	github.com/bombsimon/wsl/v5 v5.6.0 // indirect
