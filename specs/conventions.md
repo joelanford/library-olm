@@ -57,6 +57,11 @@ refactor: extract webhook validation into dedicated validator
 - `<descriptive-slug>` for ad-hoc work without a spec
 - No long-lived feature branches — keep PRs small and merge often
 
+## Test Coverage
+
+- Overall project coverage must not decrease
+- New code must have at least 70% statement coverage
+
 ## Code Review
 
 - All changes go through PR review before merging
