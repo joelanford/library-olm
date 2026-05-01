@@ -8,34 +8,28 @@ go get github.com/joelanford/library-olm
 
 ## Packages
 
-### `bundle/registry/v1` — Registry+v1 bundles
+| Package | Description |
+|---|---|
+| `bundle/v1` | Bundle identity types (`Bundle`, `NameVersionRelease`, `Release`) and version comparison |
+| `bundle/registry/v1` | Parse registry+v1 bundles from a filesystem (`FromFS`) and render to plain Kubernetes manifests (`ToPlainManifests`) |
+| `catalog/v1` | Catalog query interfaces: `Catalog`, `UpdateGraph`, `CompositeUpdateGraph` |
+| `catalog/fbc` | File-Based Catalog implementation backed by SQLite — load with `FromFS`, query via `catalog/v1` interfaces |
+| `image` | OCI registry access (`Repository`), caching (`CachingRepository`), and content-type-based unpacking (`Unpacker`) |
+| `image/bundle` | Image handlers for registry+v1 bundles and Helm chart OCI artifacts |
+| `image/catalog` | Image handler for file-based catalog (FBC) images with multi-platform support |
 
-Parse and render registry+v1 operator bundles.
+## Examples
 
-```go
-import v1 "github.com/joelanford/library-olm/bundle/registry/v1"
+Runnable examples are embedded as Go [testable examples](https://go.dev/blog/examples) — view them with `go doc` or browse the `example_test.go` files:
 
-// Parse a bundle from a filesystem (e.g. os.DirFS or embed.FS)
-bundle, err := v1.FromFS(bundleFS)
+- [`bundle/v1`](bundle/v1/example_test.go) — parsing releases, comparing bundle identities
+- [`bundle/registry/v1`](bundle/registry/v1/example_test.go) — parsing a bundle from a filesystem and rendering to plain Kubernetes manifests
+- [`catalog/fbc`](catalog/fbc/example_test.go) — loading an FBC catalog and querying packages, channels, bundles, and upgrade paths
+- [`image`](image/example_test.go) — building a custom handler and unpacking OCI image content with filters
 
-// Render to plain Kubernetes manifests
-objects, err := v1.ToPlainManifests(bundle, "my-namespace",
-    v1.WithTargetNamespaces("ns-a", "ns-b"),
-    v1.WithCertificateProvider(certProvider),
-    v1.WithDeploymentConfig(depConfig),
-)
-```
+For a more complete end-to-end example that pulls a real catalog image from a registry:
 
-### `image/bundle` — Bundle image handlers
-
-Unpack operator bundle images from OCI registries.
-
-- **`RegistryV1Handler`** — unpacks registry+v1 bundle images (manifests + metadata directories)
-- **`HelmChartHandler`** — unpacks Helm chart OCI artifacts with optional provenance verification
-
-### `image/catalog` — Catalog image handlers
-
-- **`FBCHandler`** — unpacks file-based catalog (FBC) images, with multi-platform manifest list support
+- [`examples/query_operatorhubio`](examples/query_operatorhubio) — extract the OperatorHub.io catalog image, load it, and exercise the full query API
 
 ## Design Principles
 

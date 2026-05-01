@@ -22,7 +22,8 @@ func setupUnpackManifest(t *testing.T, repo *testutil.FakeRepo, labels map[strin
 	configBlob := testutil.BuildImageConfig(labels)
 	configDesc := repo.AddBlob(configBlob, ocispecv1.MediaTypeImageConfig)
 
-	layerData := testutil.BuildTarLayer(t, files)
+	layerData, err := testutil.BuildTarLayer(files)
+	require.NoError(t, err)
 	layerDesc := repo.AddBlob(layerData, ocispecv1.MediaTypeImageLayerGzip)
 
 	manifestBytes := testutil.BuildManifest(configDesc, layerDesc)

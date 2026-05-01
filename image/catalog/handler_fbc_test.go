@@ -305,11 +305,12 @@ func TestFBCHandler_Unpack(t *testing.T) {
 		})
 		configDesc := repo.AddBlob(configBlob, ocispecv1.MediaTypeImageConfig)
 
-		layerData := testutil.BuildTarLayer(t, map[string]string{
+		layerData, err := testutil.BuildTarLayer(map[string]string{
 			"configs/package.json":          `{"name":"test"}`,
 			"configs/subdir/operator.yaml":  "apiVersion: v1",
 			"other/should-not-be-extracted": "nope",
 		})
+		require.NoError(t, err)
 		layerDesc := repo.AddBlob(layerData, ocispecv1.MediaTypeImageLayerGzip)
 
 		manifestBytes := testutil.BuildManifest(configDesc, layerDesc)
@@ -338,9 +339,10 @@ func TestFBCHandler_Unpack(t *testing.T) {
 		})
 		configDesc := repo.AddBlob(configBlob, ocispecv1.MediaTypeImageConfig)
 
-		layerData := testutil.BuildTarLayer(t, map[string]string{
+		layerData, err := testutil.BuildTarLayer(map[string]string{
 			"configs/file.txt": "content",
 		})
+		require.NoError(t, err)
 		layerDesc := repo.AddBlob(layerData, ocispecv1.MediaTypeImageLayerGzip)
 
 		manifestBytes := testutil.BuildManifest(configDesc, layerDesc)
@@ -400,9 +402,10 @@ func TestFBCHandler_Unpack(t *testing.T) {
 		})
 		configDesc := repo.AddBlob(configBlob, ocispecv1.MediaTypeImageConfig)
 
-		layerData := testutil.BuildTarLayer(t, map[string]string{
+		layerData, err := testutil.BuildTarLayer(map[string]string{
 			"configs/catalog.json": `{"catalog":true}`,
 		})
+		require.NoError(t, err)
 		layerDesc := repo.AddBlob(layerData, ocispecv1.MediaTypeImageLayerGzip)
 
 		manifestBytes := testutil.BuildManifest(configDesc, layerDesc)

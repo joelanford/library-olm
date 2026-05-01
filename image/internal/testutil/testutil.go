@@ -155,31 +155,38 @@ func BuildManifest(config ocispecv1.Descriptor, layers ...ocispecv1.Descriptor) 
 }
 
 // SetupSingleManifest creates a single-platform manifest in the fake repo with the
-// given labels on its image config. Returns the manifest descriptor and raw bytes.
-func SetupSingleManifest(repo *FakeRepo, labels map[string]string, mediaType string) (ocispecv1.Descriptor, []byte) {
+// given labels on its image config and optional layers. Returns the manifest
+// descriptor and raw bytes.
+func SetupSingleManifest(repo *FakeRepo, labels map[string]string, mediaType string, layers ...ocispecv1.Descriptor) (ocispecv1.Descriptor, []byte) {
 	configBlob := BuildImageConfig(labels)
 	configDesc := repo.AddBlob(configBlob, ocispecv1.MediaTypeImageConfig)
-	manifestBytes := BuildManifest(configDesc)
+	manifestBytes := BuildManifest(configDesc, layers...)
 	desc := repo.AddManifest(manifestBytes, mediaType)
 	return desc, manifestBytes
 }
 
 // BuildTarLayer creates a tar archive containing files with the given name→content mapping.
-func BuildTarLayer(t *testing.T, files map[string]string) []byte {
-	t.Helper()
+// Files are written in iteration order; callers needing deterministic output
+// should sort the keys beforehand.
+func BuildTarLayer(files map[string]string) ([]byte, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	for name, content := range files {
-		require.NoError(t, tw.WriteHeader(&tar.Header{
+		if err := tw.WriteHeader(&tar.Header{
 			Name: name,
 			Mode: 0644,
 			Size: int64(len(content)),
-		}))
-		_, err := tw.Write([]byte(content))
-		require.NoError(t, err)
+		}); err != nil {
+			return nil, fmt.Errorf("writing header %q: %w", name, err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			return nil, fmt.Errorf("writing content %q: %w", name, err)
+		}
 	}
-	require.NoError(t, tw.Close())
-	return buf.Bytes()
+	if err := tw.Close(); err != nil {
+		return nil, fmt.Errorf("closing tar: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // AssertFileExists asserts that the file at path exists.
