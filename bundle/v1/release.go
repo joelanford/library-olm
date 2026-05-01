@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/blang/semver/v4"
+	bsemver "github.com/blang/semver/v4"
 )
 
 // Release is a dot-separated sequence of identifiers that qualifies
@@ -19,7 +19,7 @@ import (
 //   - When all preceding identifiers are equal, fewer identifiers
 //     sort before more (e.g. "rc" < "rc.1").
 type Release struct {
-	ids []semver.PRVersion
+	ids []bsemver.PRVersion
 }
 
 // ParseRelease parses a dot-separated release string into a Release.
@@ -29,9 +29,9 @@ func ParseRelease(s string) (Release, error) {
 		return Release{}, nil
 	}
 	parts := strings.Split(s, ".")
-	ids := make([]semver.PRVersion, len(parts))
+	ids := make([]bsemver.PRVersion, len(parts))
 	for i, p := range parts {
-		pr, err := semver.NewPRVersion(p)
+		pr, err := bsemver.NewPRVersion(p)
 		if err != nil {
 			return Release{}, fmt.Errorf("invalid release identifier %q: %w", p, err)
 		}

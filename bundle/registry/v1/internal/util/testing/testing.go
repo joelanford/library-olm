@@ -3,12 +3,13 @@ package testing
 import (
 	"testing"
 
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 )
 
 type FakeCertProvider struct {

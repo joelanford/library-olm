@@ -3,12 +3,13 @@ package bundlefs_test
 import (
 	"testing"
 
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/bundlefs"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/bundlefs"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 func Test_BundleFSBuilder(t *testing.T) {

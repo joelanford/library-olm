@@ -6,9 +6,6 @@ import (
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	certmanagermetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/certproviders"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -16,6 +13,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/certproviders"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 )
 
 func Test_CertManagerProvider_InjectCABundle(t *testing.T) {

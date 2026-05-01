@@ -1,12 +1,12 @@
 package bundlev1
 
 import (
-	"github.com/blang/semver/v4"
+	bsemver "github.com/blang/semver/v4"
 )
 
 // VersionRelease pairs a semver version with a release qualifier.
 type VersionRelease struct {
-	Version semver.Version
+	Version bsemver.Version
 	Release Release
 }
 

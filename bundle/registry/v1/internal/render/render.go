@@ -4,14 +4,15 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
-	hashutil "github.com/joelanford/library-olm/bundle/registry/v1/internal/hash"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
+	hashutil "github.com/joelanford/library-olm/bundle/registry/v1/internal/hash"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 )
 
 // BundleValidator validates a RegistryV1 bundle by executing a series of

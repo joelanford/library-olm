@@ -3,14 +3,15 @@ package certproviders_test
 import (
 	"testing"
 
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/certproviders"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/certproviders"
 )
 
 func Test_OpenshiftServiceCAProvider_InjectCABundle(t *testing.T) {

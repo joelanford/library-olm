@@ -7,13 +7,14 @@ import (
 	"os"
 	"time"
 
+	"go.podman.io/image/v5/docker"
+	"go.podman.io/image/v5/types"
+
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	"github.com/joelanford/library-olm/catalog/fbc"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 	"github.com/joelanford/library-olm/image"
 	imgcatalog "github.com/joelanford/library-olm/image/catalog"
-	"go.podman.io/image/v5/docker"
-	"go.podman.io/image/v5/types"
 )
 
 const catalogImage = "//quay.io/operatorhubio/catalog:latest"

@@ -3,7 +3,7 @@ package bundlev1
 import (
 	"strings"
 
-	"github.com/blang/semver/v4"
+	bsemver "github.com/blang/semver/v4"
 )
 
 // Bundle represents a versioned unit of content in a catalog.
@@ -19,7 +19,7 @@ type Bundle interface {
 // no format-specific data.
 type NameVersionRelease struct {
 	BundleName string
-	Version    semver.Version
+	Version    bsemver.Version
 	Release    Release
 }
 

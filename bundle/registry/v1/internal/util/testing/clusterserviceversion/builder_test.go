@@ -3,11 +3,12 @@ package clusterserviceversion_test
 import (
 	"testing"
 
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/stretchr/testify/require"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 func Test_Builder(t *testing.T) {

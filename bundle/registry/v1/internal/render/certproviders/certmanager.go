@@ -7,13 +7,14 @@ import (
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	certmanagermetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 )
 
 const (

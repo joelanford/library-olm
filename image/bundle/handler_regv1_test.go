@@ -6,12 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/joelanford/library-olm/image/internal/testutil"
 	"github.com/opencontainers/go-digest"
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/manifest"
+
+	"github.com/joelanford/library-olm/image/internal/testutil"
 )
 
 // setupUnpackManifest creates a manifest with the given labels and layer files, adds everything

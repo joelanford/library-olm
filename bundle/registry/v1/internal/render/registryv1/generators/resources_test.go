@@ -6,13 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/registryv1/generators"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/registryv1/generators"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 )
 
 func Test_OptionsApplyToExecutesIgnoresNil(t *testing.T) {

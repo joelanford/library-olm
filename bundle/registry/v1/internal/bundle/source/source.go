@@ -7,8 +7,6 @@ import (
 	"io/fs"
 	"path/filepath"
 
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
-	registry "github.com/joelanford/library-olm/bundle/registry/v1/internal/operator-registry"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/operator-framework/operator-registry/alpha/property"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -16,6 +14,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/cli-runtime/pkg/resource"
 	"sigs.k8s.io/yaml"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	registry "github.com/joelanford/library-olm/bundle/registry/v1/internal/operator-registry"
 )
 
 const (

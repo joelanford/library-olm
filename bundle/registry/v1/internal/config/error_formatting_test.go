@@ -4,11 +4,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"github.com/stretchr/testify/require"
+
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
-	"github.com/operator-framework/api/pkg/operators/v1alpha1"
-	"github.com/stretchr/testify/require"
 )
 
 // Test_ErrorFormatting_SchemaLibraryVersion verifies error messages from the JSON schema

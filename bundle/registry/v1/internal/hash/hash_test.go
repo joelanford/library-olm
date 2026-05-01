@@ -4,9 +4,10 @@ import (
 	"errors"
 	"testing"
 
-	hashutil "github.com/joelanford/library-olm/bundle/registry/v1/internal/hash"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	hashutil "github.com/joelanford/library-olm/bundle/registry/v1/internal/hash"
 )
 
 type unmarshalable struct{}

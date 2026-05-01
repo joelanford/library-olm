@@ -4,10 +4,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	registryv1 "github.com/joelanford/library-olm/bundle/registry/v1"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/certproviders"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/bundlefs"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,6 +16,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	registryv1 "github.com/joelanford/library-olm/bundle/registry/v1"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/certproviders"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/bundlefs"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 func TestFromFS(t *testing.T) {

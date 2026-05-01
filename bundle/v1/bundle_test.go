@@ -3,21 +3,21 @@ package bundlev1
 import (
 	"testing"
 
-	"github.com/blang/semver/v4"
+	bsemver "github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNameVersionRelease_Bundle(t *testing.T) {
 	nvr := NameVersionRelease{
 		BundleName: "my-operator",
-		Version:    semver.MustParse("1.2.3"),
+		Version:    bsemver.MustParse("1.2.3"),
 		Release:    MustParseRelease("rc1"),
 	}
 
 	var b Bundle = nvr
 	assert.Equal(t, "my-operator", b.Name())
 	assert.Equal(t, VersionRelease{
-		Version: semver.MustParse("1.2.3"),
+		Version: bsemver.MustParse("1.2.3"),
 		Release: MustParseRelease("rc1"),
 	}, b.VersionRelease())
 }
@@ -30,26 +30,26 @@ func TestNameVersionReleaseCompare(t *testing.T) {
 	}{
 		{
 			name: "equal",
-			a:    NameVersionRelease{BundleName: "a", Version: semver.MustParse("1.0.0")},
-			b:    NameVersionRelease{BundleName: "a", Version: semver.MustParse("1.0.0")},
+			a:    NameVersionRelease{BundleName: "a", Version: bsemver.MustParse("1.0.0")},
+			b:    NameVersionRelease{BundleName: "a", Version: bsemver.MustParse("1.0.0")},
 			want: 0,
 		},
 		{
 			name: "name takes precedence",
-			a:    NameVersionRelease{BundleName: "a", Version: semver.MustParse("2.0.0")},
-			b:    NameVersionRelease{BundleName: "b", Version: semver.MustParse("1.0.0")},
+			a:    NameVersionRelease{BundleName: "a", Version: bsemver.MustParse("2.0.0")},
+			b:    NameVersionRelease{BundleName: "b", Version: bsemver.MustParse("1.0.0")},
 			want: -1,
 		},
 		{
 			name: "version breaks name tie",
-			a:    NameVersionRelease{BundleName: "a", Version: semver.MustParse("1.0.0")},
-			b:    NameVersionRelease{BundleName: "a", Version: semver.MustParse("2.0.0")},
+			a:    NameVersionRelease{BundleName: "a", Version: bsemver.MustParse("1.0.0")},
+			b:    NameVersionRelease{BundleName: "a", Version: bsemver.MustParse("2.0.0")},
 			want: -1,
 		},
 		{
 			name: "release breaks version tie",
-			a:    NameVersionRelease{BundleName: "a", Version: semver.MustParse("1.0.0"), Release: MustParseRelease("")},
-			b:    NameVersionRelease{BundleName: "a", Version: semver.MustParse("1.0.0"), Release: MustParseRelease("rc1")},
+			a:    NameVersionRelease{BundleName: "a", Version: bsemver.MustParse("1.0.0"), Release: MustParseRelease("")},
+			b:    NameVersionRelease{BundleName: "a", Version: bsemver.MustParse("1.0.0"), Release: MustParseRelease("rc1")},
 			want: -1,
 		},
 	}

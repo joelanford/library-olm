@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/joelanford/library-olm/image"
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+
+	"github.com/joelanford/library-olm/image"
 )
 
 // Bundle label keys used to identify and configure registry+v1 bundles.

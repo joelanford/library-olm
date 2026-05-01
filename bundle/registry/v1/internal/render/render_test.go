@@ -6,16 +6,17 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
-	. "github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
+	. "github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util/testing/clusterserviceversion"
 )
 
 func Test_BundleRenderer_NoConfig(t *testing.T) {

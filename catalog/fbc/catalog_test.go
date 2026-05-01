@@ -7,11 +7,12 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/blang/semver/v4"
-	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
-	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	bsemver "github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
+	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
 func TestFromFS_ValidCatalog(t *testing.T) {
@@ -79,7 +80,7 @@ func TestFromFS_ValidCatalog(t *testing.T) {
 		t.Run("Successors_Package", func(t *testing.T) {
 			from := bundlev1.NameVersionRelease{
 				BundleName: "my-operator.v1.0.0",
-				Version:    semver.MustParse("1.0.0"),
+				Version:    bsemver.MustParse("1.0.0"),
 			}
 			names := collectBundleNames(t, composite.Successors(ctx, from))
 			slices.Sort(names)
@@ -104,7 +105,7 @@ func TestFromFS_ValidCatalog(t *testing.T) {
 		t.Run("Successors_Channel", func(t *testing.T) {
 			from := bundlev1.NameVersionRelease{
 				BundleName: "my-operator.v1.0.0",
-				Version:    semver.MustParse("1.0.0"),
+				Version:    bsemver.MustParse("1.0.0"),
 			}
 			names := collectBundleNames(t, stable.Successors(ctx, from))
 			assert.Equal(t, []string{"my-operator.v1.1.0"}, names)
@@ -113,7 +114,7 @@ func TestFromFS_ValidCatalog(t *testing.T) {
 		t.Run("Successors_NoSuccessors", func(t *testing.T) {
 			from := bundlev1.NameVersionRelease{
 				BundleName: "my-operator.v1.1.0",
-				Version:    semver.MustParse("1.1.0"),
+				Version:    bsemver.MustParse("1.1.0"),
 			}
 			names := collectBundleNames(t, stable.Successors(ctx, from))
 			assert.Empty(t, names)
@@ -135,13 +136,13 @@ func TestFromFS_SkipRange(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	from100 := bundlev1.NameVersionRelease{BundleName: "skip-operator.v1.0.0", Version: semver.MustParse("1.0.0")}
+	from100 := bundlev1.NameVersionRelease{BundleName: "skip-operator.v1.0.0", Version: bsemver.MustParse("1.0.0")}
 	names := collectBundleNames(t, ch.Successors(ctx, from100))
 	slices.Sort(names)
 	// v1.5.0 replaces v1.0.0, and v2.0.0's skipRange includes v1.0.0
 	assert.Equal(t, []string{"skip-operator.v1.5.0", "skip-operator.v2.0.0"}, names)
 
-	from150 := bundlev1.NameVersionRelease{BundleName: "skip-operator.v1.5.0", Version: semver.MustParse("1.5.0")}
+	from150 := bundlev1.NameVersionRelease{BundleName: "skip-operator.v1.5.0", Version: bsemver.MustParse("1.5.0")}
 	names = collectBundleNames(t, ch.Successors(ctx, from150))
 	slices.Sort(names)
 	assert.Equal(t, []string{"skip-operator.v2.0.0"}, names)
@@ -299,7 +300,7 @@ func TestFromFS_PreReleaseVersion(t *testing.T) {
 	assert.True(t, vr.Release.IsEmpty())
 
 	// skipRange ">=0.9.0 <1.0.0" should match 1.0.0-rc1 (since 1.0.0-rc1 < 1.0.0 in semver)
-	from := bundlev1.NameVersionRelease{BundleName: "pre-op.v1.0.0-rc1", Version: semver.MustParse("1.0.0-rc1")}
+	from := bundlev1.NameVersionRelease{BundleName: "pre-op.v1.0.0-rc1", Version: bsemver.MustParse("1.0.0-rc1")}
 	names := collectBundleNames(t, ch.Successors(ctx, from))
 	assert.Equal(t, []string{"pre-op.v1.0.0"}, names)
 }
@@ -387,7 +388,7 @@ func TestFromFS_SuccessorsUnknownBundle(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	from := bundlev1.NameVersionRelease{BundleName: "nonexistent.v9.9.9", Version: semver.MustParse("9.9.9")}
+	from := bundlev1.NameVersionRelease{BundleName: "nonexistent.v9.9.9", Version: bsemver.MustParse("9.9.9")}
 	names := collectBundleNames(t, ch.Successors(ctx, from))
 	assert.Empty(t, names)
 }

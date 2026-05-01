@@ -12,11 +12,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/joelanford/library-olm/image/internal/testutil"
 	"github.com/opencontainers/go-digest"
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/joelanford/library-olm/image/internal/testutil"
 )
 
 func TestCombineFilters(t *testing.T) {

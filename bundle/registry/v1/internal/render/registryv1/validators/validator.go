@@ -8,11 +8,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	regv1bundle "github.com/operator-framework/operator-registry/pkg/lib/bundle"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
 )
 
 // CheckDeploymentSpecUniqueness checks that each strategy deployment spec in the csv has a unique name.

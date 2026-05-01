@@ -3,12 +3,13 @@ package v1
 import (
 	"io/fs"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle/source"
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/registryv1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Bundle is a parsed registry+v1 bundle containing a CSV, CRDs, and other resources.

@@ -1,13 +1,14 @@
 package certproviders
 
 import (
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 )
 
 const (

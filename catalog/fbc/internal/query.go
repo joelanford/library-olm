@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"iter"
 
-	"github.com/blang/semver/v4"
+	bsemver "github.com/blang/semver/v4"
+
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
@@ -215,10 +216,10 @@ func yieldBundleRows(rows *sql.Rows, yield func(bundlev1.Bundle, error) bool) {
 			}
 			continue
 		}
-		var ver semver.Version
+		var ver bsemver.Version
 		if versionStr != "" {
 			var err error
-			ver, err = semver.Parse(versionStr)
+			ver, err = bsemver.Parse(versionStr)
 			if err != nil {
 				if !yield(nil, fmt.Errorf("parse version %q: %w", versionStr, err)) {
 					return

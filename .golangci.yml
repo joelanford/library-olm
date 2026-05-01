@@ -4,28 +4,52 @@ formatters:
   enable:
     - gci
     - gofmt
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/joelanford/library-olm)
 
 linters:
   enable:
     - errcheck
-    - gomodguard
+    - depguard
     - govet
+    - importas
     - ineffassign
     - misspell
     - staticcheck
     - unused
-
-linters-settings:
-  gci:
-    sections:
-      - standard
-      - default
-      - prefix(github.com/joelanford/library-olm)
-
-  gomodguard:
-    blocked:
-      modules:
-        - github.com/operator-framework/api:
-            reason: "legacy dependency — use minimally, prefer local types (see specs/mission.md)"
-        - github.com/operator-framework/operator-registry:
-            reason: "legacy dependency — use minimally (see specs/mission.md)"
+  settings:
+    importas:
+      no-unaliased: true
+      alias:
+        - pkg: github.com/joelanford/library-olm/bundle/v1
+          alias: bundlev1
+        - pkg: github.com/joelanford/library-olm/bundle/registry/v1
+          alias: registryv1
+        - pkg: github.com/joelanford/library-olm/catalog/v1
+          alias: catalogv1
+        - pkg: github.com/joelanford/library-olm/image/bundle
+          alias: imgbundle
+        - pkg: github.com/joelanford/library-olm/image/catalog
+          alias: imgcatalog
+        - pkg: github.com/blang/semver/v4
+          alias: bsemver
+        - pkg: github.com/Masterminds/semver/v3
+          alias: mmsemver
+    depguard:
+      rules:
+        operator-framework:
+          list-mode: lax
+          files:
+            - $all
+            - "!**/bundle/registry/v1/internal/**"
+            - "!**/bundle/registry/v1/*_test.go"
+            - "!**/catalog/fbc/internal/**"
+          deny:
+            - pkg: github.com/operator-framework/api
+              desc: "legacy dependency — only allowed in bundle/registry/v1/internal and catalog/fbc/internal (see specs/mission.md)"
+            - pkg: github.com/operator-framework/operator-registry
+              desc: "legacy dependency — only allowed in bundle/registry/v1/internal and catalog/fbc/internal (see specs/mission.md)"

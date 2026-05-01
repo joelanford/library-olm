@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/blang/semver/v4"
-	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
+	bsemver "github.com/blang/semver/v4"
 	"github.com/operator-framework/operator-registry/alpha/declcfg"
+
+	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 )
 
 type OLMPackageHandler struct{}
@@ -91,7 +92,7 @@ func (h *OLMPackageHandler) insertBundles(tx *sql.Tx, packageName string) error 
 		if err := rows.Scan(&name, &versionStr, &releaseStr); err != nil {
 			return err
 		}
-		if _, err := semver.Parse(versionStr); err != nil {
+		if _, err := bsemver.Parse(versionStr); err != nil {
 			return fmt.Errorf("parse version %q for bundle %q: %w", versionStr, name, err)
 		}
 		if releaseStr != "" {
@@ -251,7 +252,7 @@ func (h *OLMPackageHandler) ensurePhantomBundle(tx *sql.Tx, bundleName string) e
 }
 
 func (h *OLMPackageHandler) computeSkipRangeSuccessors(tx *sql.Tx, chGraphID int64, bundleName string, skipRangeStr string) error {
-	rng, err := semver.ParseRange(skipRangeStr)
+	rng, err := bsemver.ParseRange(skipRangeStr)
 	if err != nil {
 		return fmt.Errorf("parse skipRange %q: %w", skipRangeStr, err)
 	}
@@ -271,7 +272,7 @@ func (h *OLMPackageHandler) computeSkipRangeSuccessors(tx *sql.Tx, chGraphID int
 		if err := rows.Scan(&name, &versionStr); err != nil {
 			return err
 		}
-		ver, err := semver.Parse(versionStr)
+		ver, err := bsemver.Parse(versionStr)
 		if err != nil {
 			continue
 		}

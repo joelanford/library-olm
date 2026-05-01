@@ -8,10 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
-	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	registrybundle "github.com/operator-framework/operator-registry/pkg/lib/bundle"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
@@ -24,6 +20,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
 )
 
 const (
