@@ -41,6 +41,10 @@ Look for:
 - Use AskUserQuestion for issues with multiple valid options.
 - Summarize any remaining concerns that need the author's judgment.
 
-## Step 7: Suggest shipping
+## Step 7: Update spec status
+
+If the review found no blocking issues and the work item's spec is still `status: in-progress`, use AskUserQuestion to ask whether to set it to `status: done`. If yes, update the README.md frontmatter and commit the change.
+
+## Step 8: Suggest shipping
 
 If no blocking issues remain, suggest the user run `/sdd-ship` to finalize and publish the changes.
