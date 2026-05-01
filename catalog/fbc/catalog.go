@@ -23,8 +23,13 @@ type Catalog struct {
 // FromFS walks fsys, parsing FBC blobs via declcfg.WalkMetasFS, and
 // loads the structured data into a SQLite database. After loading,
 // it dispatches per-package-schema handlers that validate and compute
-// successor graphs into normalized tables. Only one blob is in memory
-// at a time during the walk phase.
+// successor graphs into normalized tables.
+//
+// If individual packages fail to load or normalize, FromFS returns a
+// non-nil Catalog containing only the valid packages alongside an error
+// that can be unwrapped into [PackageError] values (one per failed
+// package). Fatal errors (corrupt filesystem, database failures) return
+// (nil, err).
 //
 // The database is stored in a temporary file. Call Close to remove it.
 func FromFS(ctx context.Context, fsys fs.FS) (*Catalog, error) {
@@ -33,24 +38,41 @@ func FromFS(ctx context.Context, fsys fs.FS) (*Catalog, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	if err := internal.Ingest(ctx, db, fsys); err != nil {
+	ingestResult, err := internal.Ingest(ctx, db, fsys)
+	if err != nil {
 		_ = internal.CloseDB(db, tmpDir)
 		return nil, fmt.Errorf("ingest: %w", err)
+	}
+
+	skipPackages := make(map[string]bool, len(ingestResult.PackageErrors))
+	for pkg := range ingestResult.PackageErrors {
+		skipPackages[pkg] = true
 	}
 
 	registry := internal.NewHandlerRegistry()
 	registry.Register(&internal.OLMPackageHandler{})
 
-	if err := internal.Normalize(ctx, db, registry); err != nil {
+	normalizeResult, err := internal.Normalize(ctx, db, registry, skipPackages)
+	if err != nil {
 		_ = internal.CloseDB(db, tmpDir)
 		return nil, fmt.Errorf("normalize: %w", err)
 	}
+
+	for pkg := range normalizeResult.PackageErrors {
+		skipPackages[pkg] = true
+	}
+	if err := internal.DeletePackages(ctx, db, skipPackages); err != nil {
+		_ = internal.CloseDB(db, tmpDir)
+		return nil, fmt.Errorf("cleanup failed packages: %w", err)
+	}
+
+	pkgErr := mergePackageErrors(ingestResult.PackageErrors, normalizeResult.PackageErrors)
 
 	return &Catalog{
 		db:     db,
 		tmpDir: tmpDir,
 		query:  &internal.CatalogQuery{DB: db},
-	}, nil
+	}, pkgErr
 }
 
 // Close releases database resources and removes the temporary file.

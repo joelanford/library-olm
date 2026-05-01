@@ -4,22 +4,25 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
+	"sync"
 
 	"github.com/operator-framework/operator-registry/alpha/declcfg"
 	"github.com/operator-framework/operator-registry/alpha/property"
 )
 
-// Ingest walks fsys via declcfg.WalkMetasFS, parses each blob, and
-// inserts structured fields into raw tables. A dedicated writer
-// goroutine batches inserts into transactions for performance.
 type ingestRow struct {
 	fn func(tx *sql.Tx) error
 }
 
-func Ingest(ctx context.Context, db *sql.DB, fsys fs.FS) error {
+type IngestResult struct {
+	PackageErrors map[string][]error
+}
+
+func Ingest(ctx context.Context, db *sql.DB, fsys fs.FS) (*IngestResult, error) {
 	rowCh := make(chan ingestRow, 256)
 	errCh := make(chan error, 1)
 
@@ -27,86 +30,111 @@ func Ingest(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		errCh <- batchWriter(ctx, db, rowCh)
 	}()
 
+	var mu sync.Mutex
+	pkgErrors := make(map[string][]error)
+
+	recordError := func(pkg string, err error) {
+		mu.Lock()
+		pkgErrors[pkg] = append(pkgErrors[pkg], err)
+		mu.Unlock()
+	}
+
 	walkErr := declcfg.WalkMetasFS(ctx, fsys, func(_ string, meta *declcfg.Meta, err error) error {
 		if err != nil {
 			return err
 		}
-		insert, err := metaToInsert(meta)
-		if err != nil {
-			return err
-		}
-		if insert == nil {
+
+		var insert func(tx *sql.Tx) error
+		var parseErr error
+		switch meta.Schema {
+		case declcfg.SchemaPackage:
+			insert, parseErr = parsePackage(meta)
+		case declcfg.SchemaChannel:
+			insert, parseErr = parseChannel(meta)
+		case declcfg.SchemaBundle:
+			insert, parseErr = parseBundle(meta)
+		default:
 			return nil
 		}
-		select {
-		case rowCh <- ingestRow{fn: insert}:
+		if parseErr != nil {
+			if meta.Package == "" {
+				return parseErr
+			}
+			recordError(meta.Package, parseErr)
 			return nil
-		case <-ctx.Done():
-			return ctx.Err()
 		}
+		return sendRow(ctx, rowCh, insert)
 	})
 
 	close(rowCh)
 	writerErr := <-errCh
 
 	if walkErr != nil {
-		return walkErr
+		return nil, walkErr
 	}
-	return writerErr
+	if writerErr != nil {
+		return nil, writerErr
+	}
+	return &IngestResult{PackageErrors: pkgErrors}, nil
 }
 
-func metaToInsert(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
-	switch meta.Schema {
-	case declcfg.SchemaPackage:
-		var p declcfg.Package
-		if err := json.Unmarshal(meta.Blob, &p); err != nil {
-			return nil, fmt.Errorf("parse package: %w", err)
-		}
-		return func(tx *sql.Tx) error {
-			_, err := tx.Exec("INSERT INTO raw_olm_package (name) VALUES (?)", p.Name)
-			return err
-		}, nil
+func sendRow(ctx context.Context, rowCh chan<- ingestRow, fn func(tx *sql.Tx) error) error {
+	select {
+	case rowCh <- ingestRow{fn: fn}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
-	case declcfg.SchemaChannel:
-		var ch declcfg.Channel
-		if err := json.Unmarshal(meta.Blob, &ch); err != nil {
-			return nil, fmt.Errorf("parse channel: %w", err)
+func parsePackage(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
+	var p declcfg.Package
+	if err := json.Unmarshal(meta.Blob, &p); err != nil {
+		return nil, fmt.Errorf("parse package: %w", err)
+	}
+	return func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO raw_olm_package (package_name) VALUES (?)", p.Name)
+		return err
+	}, nil
+}
+
+func parseChannel(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
+	var ch declcfg.Channel
+	if err := json.Unmarshal(meta.Blob, &ch); err != nil {
+		return nil, fmt.Errorf("parse channel: %w", err)
+	}
+	return func(tx *sql.Tx) error {
+		if _, err := tx.Exec("INSERT INTO raw_olm_channel (name, package_name) VALUES (?, ?)",
+			ch.Name, ch.Package); err != nil {
+			return err
 		}
-		return func(tx *sql.Tx) error {
-			if _, err := tx.Exec("INSERT INTO raw_olm_channel (name, package_name) VALUES (?, ?)",
-				ch.Name, ch.Package); err != nil {
+		for _, entry := range ch.Entries {
+			skips := strings.Join(entry.Skips, ",")
+			if _, err := tx.Exec(
+				"INSERT INTO raw_olm_channel_entry (channel_name, package_name, bundle_name, replaces, skips, skip_range) VALUES (?, ?, ?, ?, ?, ?)",
+				ch.Name, ch.Package, entry.Name, entry.Replaces, skips, entry.SkipRange,
+			); err != nil {
 				return err
 			}
-			for _, entry := range ch.Entries {
-				skips := strings.Join(entry.Skips, ",")
-				if _, err := tx.Exec(
-					"INSERT INTO raw_olm_channel_entry (channel_name, package_name, bundle_name, replaces, skips, skip_range) VALUES (?, ?, ?, ?, ?, ?)",
-					ch.Name, ch.Package, entry.Name, entry.Replaces, skips, entry.SkipRange,
-				); err != nil {
-					return err
-				}
-			}
-			return nil
-		}, nil
-
-	case declcfg.SchemaBundle:
-		var b declcfg.Bundle
-		if err := json.Unmarshal(meta.Blob, &b); err != nil {
-			return nil, fmt.Errorf("parse bundle: %w", err)
 		}
-		version, release, err := extractBundleVersionRelease(b)
-		if err != nil {
-			return nil, err
-		}
-		return func(tx *sql.Tx) error {
-			_, err := tx.Exec("INSERT INTO raw_olm_bundle (name, package_name, version, release) VALUES (?, ?, ?, ?)",
-				b.Name, b.Package, version, release)
-			return err
-		}, nil
+		return nil
+	}, nil
+}
 
-	default:
-		return nil, nil
+func parseBundle(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
+	var b declcfg.Bundle
+	if err := json.Unmarshal(meta.Blob, &b); err != nil {
+		return nil, fmt.Errorf("parse bundle: %w", err)
 	}
+	version, release, err := extractBundleVersionRelease(b)
+	if err != nil {
+		return nil, err
+	}
+	return func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO raw_olm_bundle (name, package_name, version, release) VALUES (?, ?, ?, ?)",
+			b.Name, b.Package, version, release)
+		return err
+	}, nil
 }
 
 func extractBundleVersionRelease(b declcfg.Bundle) (string, string, error) {
@@ -137,8 +165,7 @@ func batchWriter(ctx context.Context, db *sql.DB, rowCh <-chan ingestRow) error 
 		}
 		for _, fn := range batch {
 			if err := fn(tx); err != nil {
-				_ = tx.Rollback()
-				return err
+				return errors.Join(err, tx.Rollback())
 			}
 		}
 		if err := tx.Commit(); err != nil {

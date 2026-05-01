@@ -62,7 +62,7 @@ const schemaSQL = `
 -- Table names derived from FBC schema strings: replace "." with "_", prefix "raw_"
 
 CREATE TABLE raw_olm_package (
-    name TEXT NOT NULL PRIMARY KEY
+    package_name TEXT NOT NULL PRIMARY KEY
 );
 
 CREATE TABLE raw_olm_channel (

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -47,7 +48,15 @@ func run() error {
 	start = time.Now()
 	cat, err := fbc.FromFS(ctx, os.DirFS(tmpDir))
 	if err != nil {
-		return fmt.Errorf("load catalog: %w", err)
+		if cat == nil {
+			return fmt.Errorf("load catalog: %w", err)
+		}
+		var pkgErr *fbc.PackageError
+		for _, e := range err.(interface{ Unwrap() []error }).Unwrap() {
+			if errors.As(e, &pkgErr) {
+				log.Printf("WARNING: %v", pkgErr)
+			}
+		}
 	}
 	defer func() { _ = cat.Close() }()
 	log.Printf("Loaded catalog in %s", time.Since(start))
@@ -71,23 +80,24 @@ func run() error {
 		return nil
 	}
 
-	// GetPackage
-	target := pkgNames[0]
-	log.Printf("Getting package %q...", target)
-	start = time.Now()
+	// Find the package with the most channels and bundles
+	target, err := findInterestingPackage(ctx, cat, pkgNames)
+	if err != nil {
+		return err
+	}
+
 	pkg, err := cat.GetPackage(ctx, target)
 	if err != nil {
 		return fmt.Errorf("get package %q: %w", target, err)
 	}
-	log.Printf("Got package %q in %s", pkg.Name(), time.Since(start))
 
-	// CompositeUpdateGraph: ListGraphs
 	composite, ok := pkg.(catalogv1.CompositeUpdateGraph)
 	if !ok {
 		log.Printf("Package %q is not a CompositeUpdateGraph, skipping channel queries", target)
 		return nil
 	}
 
+	// ListGraphs
 	log.Printf("Listing graphs (channels) for package %q...", target)
 	start = time.Now()
 	var graphNames []string
@@ -97,43 +107,32 @@ func run() error {
 		}
 		graphNames = append(graphNames, g.Name())
 	}
-	log.Printf("Found %d graphs in %s: %v", len(graphNames), time.Since(start), graphNames)
+	log.Printf("Found %d channels in %s: %v", len(graphNames), time.Since(start), graphNames)
 
-	// CompositeUpdateGraph: ListBundles (package-level, union across channels)
-	log.Printf("Listing all bundles in package %q (union across channels)...", target)
+	// ListBundles (package-level)
+	log.Printf("Listing all bundles in package %q...", target)
 	start = time.Now()
 	var pkgBundleCount int
-	var sampleBundle bundlev1.Bundle
-	for b, err := range composite.ListBundles(ctx) {
+	for _, err := range composite.ListBundles(ctx) {
 		if err != nil {
 			return fmt.Errorf("list bundles (package): %w", err)
 		}
 		pkgBundleCount++
-		if sampleBundle == nil {
-			sampleBundle = b
-		}
 	}
 	log.Printf("Found %d bundles (package-level) in %s", pkgBundleCount, time.Since(start))
 
-	// CompositeUpdateGraph: GetGraph
-	if len(graphNames) > 0 {
-		chName := graphNames[0]
-		log.Printf("Getting graph %q...", chName)
-		start = time.Now()
+	// Exercise each channel
+	for _, chName := range graphNames {
 		ch, err := composite.GetGraph(ctx, chName)
 		if err != nil {
 			return fmt.Errorf("get graph %q: %w", chName, err)
 		}
-		log.Printf("Got graph %q in %s", ch.Name(), time.Since(start))
 
-		// UpdateGraph: ListBundles (channel-level)
-		log.Printf("Listing bundles in channel %q...", chName)
-		start = time.Now()
 		var chBundleCount int
 		var chFirstBundle, chLastBundle bundlev1.Bundle
 		for b, err := range ch.ListBundles(ctx) {
 			if err != nil {
-				return fmt.Errorf("list bundles (channel): %w", err)
+				return fmt.Errorf("list bundles (channel %q): %w", chName, err)
 			}
 			chBundleCount++
 			if chFirstBundle == nil {
@@ -141,63 +140,104 @@ func run() error {
 			}
 			chLastBundle = b
 		}
-		log.Printf("Found %d bundles in channel %q in %s", chBundleCount, chName, time.Since(start))
 
+		first, last := "", ""
 		if chFirstBundle != nil {
-			vr := chFirstBundle.VersionRelease()
-			log.Printf("  First bundle: %s (version=%s, release=%s)", chFirstBundle.Name(), vr.Version, vr.Release)
+			first = fmt.Sprintf("%s (%s)", chFirstBundle.Name(), chFirstBundle.VersionRelease().Version)
 		}
 		if chLastBundle != nil {
-			vr := chLastBundle.VersionRelease()
-			log.Printf("  Last bundle:  %s (version=%s, release=%s)", chLastBundle.Name(), vr.Version, vr.Release)
+			last = fmt.Sprintf("%s (%s)", chLastBundle.Name(), chLastBundle.VersionRelease().Version)
 		}
+		log.Printf("  Channel %q: %d bundles, first=%s, last=%s", chName, chBundleCount, first, last)
 
-		// UpdateGraph: Successors (channel-level)
+		// Successors from oldest bundle in this channel
 		if chFirstBundle != nil {
-			log.Printf("Querying successors of %q in channel %q...", chFirstBundle.Name(), chName)
-			start = time.Now()
 			var successorCount int
-			for s, err := range ch.Successors(ctx, chFirstBundle) {
+			for _, err := range ch.Successors(ctx, chFirstBundle) {
 				if err != nil {
-					return fmt.Errorf("successors: %w", err)
+					return fmt.Errorf("successors in channel %q: %w", chName, err)
 				}
 				successorCount++
-				if successorCount <= 3 {
-					vr := s.VersionRelease()
-					log.Printf("  Successor: %s (version=%s)", s.Name(), vr.Version)
-				}
 			}
-			if successorCount > 3 {
-				log.Printf("  ... and %d more", successorCount-3)
-			}
-			log.Printf("Found %d successors in %s", successorCount, time.Since(start))
+			log.Printf("    %d successors from %s", successorCount, chFirstBundle.Name())
 		}
+	}
 
-		// CompositeUpdateGraph: Successors (package-level)
-		if chFirstBundle != nil {
-			log.Printf("Querying successors of %q across all channels...", chFirstBundle.Name())
+	// Package-level successors from the first bundle of the first channel
+	if len(graphNames) > 0 {
+		ch, err := composite.GetGraph(ctx, graphNames[0])
+		if err != nil {
+			return fmt.Errorf("get graph %q: %w", graphNames[0], err)
+		}
+		var firstBundle bundlev1.Bundle
+		for b, err := range ch.ListBundles(ctx) {
+			if err != nil {
+				return fmt.Errorf("list bundles: %w", err)
+			}
+			firstBundle = b
+			break
+		}
+		if firstBundle != nil {
 			start = time.Now()
-			var pkgSuccessorCount int
-			for _, err := range composite.Successors(ctx, chFirstBundle) {
+			var count int
+			for _, err := range composite.Successors(ctx, firstBundle) {
 				if err != nil {
 					return fmt.Errorf("successors (package): %w", err)
 				}
-				pkgSuccessorCount++
+				count++
 			}
-			log.Printf("Found %d successors (package-level) in %s", pkgSuccessorCount, time.Since(start))
+			log.Printf("Package-level: %d successors from %s in %s", count, firstBundle.Name(), time.Since(start))
 		}
 	}
 
 	// GetPackage for unknown package (error case)
-	log.Println("Querying non-existent package...")
-	start = time.Now()
 	_, err = cat.GetPackage(ctx, "this-package-does-not-exist-12345")
 	if err != nil {
-		log.Printf("Expected error for unknown package: %v (took %s)", err, time.Since(start))
+		log.Printf("Expected error for unknown package: %v", err)
 	}
 
 	log.Println("Done!")
 	return nil
+}
+
+func findInterestingPackage(ctx context.Context, cat *fbc.Catalog, pkgNames []string) (string, error) {
+	log.Println("Scanning packages to find one with multiple channels and many bundles...")
+	start := time.Now()
+
+	bestName := pkgNames[0]
+	bestChannels, bestBundles := 0, 0
+
+	for _, name := range pkgNames {
+		pkg, err := cat.GetPackage(ctx, name)
+		if err != nil {
+			continue
+		}
+		composite, ok := pkg.(catalogv1.CompositeUpdateGraph)
+		if !ok {
+			continue
+		}
+
+		var channels, bundles int
+		for _, err := range composite.ListGraphs(ctx) {
+			if err != nil {
+				break
+			}
+			channels++
+		}
+		for _, err := range composite.ListBundles(ctx) {
+			if err != nil {
+				break
+			}
+			bundles++
+		}
+
+		if channels > bestChannels || (channels == bestChannels && bundles > bestBundles) {
+			bestName, bestChannels, bestBundles = name, channels, bundles
+		}
+	}
+
+	log.Printf("Selected package %q (%d channels, %d bundles) in %s", bestName, bestChannels, bestBundles, time.Since(start))
+	return bestName, nil
 }
 
 func extractCatalogImage(ctx context.Context, dest string) error {

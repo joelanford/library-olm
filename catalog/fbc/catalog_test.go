@@ -2,6 +2,7 @@ package fbc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -261,9 +262,13 @@ func TestFromFS_InvalidSkipRange(t *testing.T) {
 		)},
 	}
 	ctx := context.Background()
-	_, err := FromFS(ctx, fsys)
+	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "skipRange")
+	require.NotNil(t, cat)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	requirePackageError(t, err, "bad-op", "skipRange")
+	assertEmptyCatalog(t, ctx, cat)
 }
 
 func TestFromFS_PreReleaseVersion(t *testing.T) {
@@ -342,9 +347,13 @@ func TestFromFS_InvalidBundleRelease(t *testing.T) {
 		)},
 	}
 	ctx := context.Background()
-	_, err := FromFS(ctx, fsys)
+	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "release")
+	require.NotNil(t, cat)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	requirePackageError(t, err, "bad-rel", "release")
+	assertEmptyCatalog(t, ctx, cat)
 }
 
 func TestFromFS_MissingPackageProperty(t *testing.T) {
@@ -356,9 +365,13 @@ func TestFromFS_MissingPackageProperty(t *testing.T) {
 		)},
 	}
 	ctx := context.Background()
-	_, err := FromFS(ctx, fsys)
+	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "olm.package")
+	require.NotNil(t, cat)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	requirePackageError(t, err, "no-prop", "olm.package")
+	assertEmptyCatalog(t, ctx, cat)
 }
 
 func TestFromFS_InvalidBundleVersion(t *testing.T) {
@@ -370,9 +383,13 @@ func TestFromFS_InvalidBundleVersion(t *testing.T) {
 		)},
 	}
 	ctx := context.Background()
-	_, err := FromFS(ctx, fsys)
+	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "version")
+	require.NotNil(t, cat)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	requirePackageError(t, err, "bad-ver", "version")
+	assertEmptyCatalog(t, ctx, cat)
 }
 
 func TestFromFS_SuccessorsUnknownBundle(t *testing.T) {
@@ -402,9 +419,13 @@ func TestFromFS_MissingBundle(t *testing.T) {
 		)},
 	}
 	ctx := context.Background()
-	_, err := FromFS(ctx, fsys)
+	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown bundles")
+	require.NotNil(t, cat)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	requirePackageError(t, err, "bad-operator", "unknown bundles")
+	assertEmptyCatalog(t, ctx, cat)
 }
 
 func TestFromFS_EmptyFS(t *testing.T) {
@@ -483,4 +504,161 @@ func fbcBundle(pkg, name, version string) string {
 func fbcBundleWithRelease(pkg, name, version, release string) string {
 	return fmt.Sprintf("{\"schema\":\"olm.bundle\",\"package\":\"%s\",\"name\":\"%s\",\"properties\":[{\"type\":\"olm.package\",\"value\":{\"packageName\":\"%s\",\"version\":\"%s\",\"release\":\"%s\"}}]}\n",
 		pkg, name, pkg, version, release)
+}
+
+func requirePackageError(t *testing.T, err error, pkg string, msgSubstring string) {
+	t.Helper()
+	var pkgErr *PackageError
+	found := false
+	for _, e := range err.(interface{ Unwrap() []error }).Unwrap() {
+		if errors.As(e, &pkgErr) && pkgErr.Package == pkg {
+			found = true
+			assert.Contains(t, pkgErr.Error(), msgSubstring, "PackageError for %q should contain %q", pkg, msgSubstring)
+		}
+	}
+	require.True(t, found, "expected PackageError for package %q, got: %v", pkg, err)
+}
+
+func assertEmptyCatalog(t *testing.T, ctx context.Context, cat *Catalog) {
+	t.Helper()
+	var count int
+	for _, err := range cat.ListPackages(ctx) {
+		require.NoError(t, err)
+		count++
+	}
+	assert.Equal(t, 0, count)
+}
+
+func TestFromFS_MixedValidAndMalformed(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("good-op") +
+				fbcChannel("good-op", "stable", `[{"name":"good-op.v1.0.0"}]`) +
+				fbcBundle("good-op", "good-op.v1.0.0", "1.0.0") +
+				fbcPackage("bad-op") +
+				fbcChannel("bad-op", "stable", `[{"name":"bad-op.v1.0.0"}]`) +
+				fbcBundle("bad-op", "bad-op.v1.0.0", "not-semver"),
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	require.NotNil(t, cat)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	requirePackageError(t, err, "bad-op", "version")
+
+	var names []string
+	for pkg, err := range cat.ListPackages(ctx) {
+		require.NoError(t, err)
+		names = append(names, pkg.Name())
+	}
+	assert.Equal(t, []string{"good-op"}, names)
+
+	_, err = cat.GetPackage(ctx, "bad-op")
+	require.Error(t, err)
+}
+
+func TestFromFS_AllMalformed(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("bad1") +
+				fbcChannel("bad1", "stable", `[{"name":"bad1.v1.0.0"}]`) +
+				fbcBundle("bad1", "bad1.v1.0.0", "not-semver") +
+				fbcPackage("bad2") +
+				fbcChannel("bad2", "stable", `[{"name":"bad2.v1.0.0","skipRange":"<=bad"}]`) +
+				fbcBundle("bad2", "bad2.v1.0.0", "1.0.0"),
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	require.NotNil(t, cat)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	requirePackageError(t, err, "bad1", "version")
+	requirePackageError(t, err, "bad2", "skipRange")
+	assertEmptyCatalog(t, ctx, cat)
+}
+
+func TestFromFS_MalformedPackageBlob(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			`{"schema":"olm.package","name":"bad-pkg","icon":"not-an-object"}` + "\n",
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	require.Nil(t, cat)
+	assert.Contains(t, err.Error(), "parse package")
+}
+
+func TestFromFS_MalformedChannelBlob(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("ch-op") +
+				`{"schema":"olm.channel","package":"ch-op","name":"stable","entries":"not-an-array"}` + "\n" +
+				fbcBundle("ch-op", "ch-op.v1.0.0", "1.0.0"),
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	require.NotNil(t, cat)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	requirePackageError(t, err, "ch-op", "parse channel")
+	assertEmptyCatalog(t, ctx, cat)
+}
+
+func TestFromFS_MalformedBundleBlob(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("b-op") +
+				fbcChannel("b-op", "stable", `[{"name":"b-op.v1.0.0"}]`) +
+				`{"schema":"olm.bundle","package":"b-op","name":"b-op.v1.0.0","properties":"not-an-array"}` + "\n",
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	require.NotNil(t, cat)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	requirePackageError(t, err, "b-op", "parse bundle")
+	assertEmptyCatalog(t, ctx, cat)
+}
+
+func TestFromFS_MalformedBlobEmptyPackage(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			`{"schema":"olm.channel","name":"stable","entries":"not-an-array"}` + "\n",
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	require.Nil(t, cat)
+	assert.Contains(t, err.Error(), "parse channel")
+}
+
+func TestFromFS_PackageErrorUnwrap(t *testing.T) {
+	fsys := fstest.MapFS{
+		"catalog.json": &fstest.MapFile{Data: []byte(
+			fbcPackage("bad-op") +
+				fbcChannel("bad-op", "stable", `[{"name":"bad-op.v1.0.0"}]`) +
+				fbcBundle("bad-op", "bad-op.v1.0.0", "not-semver"),
+		)},
+	}
+	ctx := context.Background()
+	cat, err := FromFS(ctx, fsys)
+	require.Error(t, err)
+	require.NotNil(t, cat)
+	defer func() { require.NoError(t, cat.Close()) }()
+
+	var pkgErr *PackageError
+	require.True(t, errors.As(err, &pkgErr))
+	assert.Equal(t, "bad-op", pkgErr.Package)
+	assert.NotEmpty(t, pkgErr.Errs)
 }
