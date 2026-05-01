@@ -86,6 +86,7 @@ CREATE TABLE raw_olm_bundle (
     package_name TEXT NOT NULL,
     version      TEXT NOT NULL,
     release      TEXT NOT NULL DEFAULT '',
+    image        TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (package_name, name)
 );
 
@@ -100,9 +101,11 @@ CREATE TABLE graphs (
 );
 
 CREATE TABLE bundles (
-    id      TEXT NOT NULL PRIMARY KEY,
-    version TEXT NOT NULL DEFAULT '',
-    release TEXT NOT NULL DEFAULT ''
+    id           TEXT NOT NULL PRIMARY KEY,
+    package_name TEXT NOT NULL DEFAULT '',
+    version      TEXT NOT NULL DEFAULT '',
+    release      TEXT NOT NULL DEFAULT '',
+    uri          TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE graph_bundles (

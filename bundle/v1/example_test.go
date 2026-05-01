@@ -33,13 +33,13 @@ func ExampleParseRelease() {
 
 func ExampleNameVersionRelease_Compare() {
 	a := bundlev1.NameVersionRelease{
-		BundleName: "my-operator.v1.0.0",
-		Version:    bsemver.MustParse("1.0.0"),
+		Name:    "my-operator",
+		Version: bsemver.MustParse("1.0.0"),
 	}
 	b := bundlev1.NameVersionRelease{
-		BundleName: "my-operator.v2.0.0",
-		Version:    bsemver.MustParse("2.0.0"),
-		Release:    bundlev1.MustParseRelease("1"),
+		Name:    "my-operator",
+		Version: bsemver.MustParse("2.0.0"),
+		Release: bundlev1.MustParseRelease("1"),
 	}
 	fmt.Println("a < b:", a.Compare(b))
 	fmt.Println("b > a:", b.Compare(a))

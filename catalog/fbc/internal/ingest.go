@@ -131,8 +131,8 @@ func parseBundle(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
 		return nil, err
 	}
 	return func(tx *sql.Tx) error {
-		_, err := tx.Exec("INSERT INTO raw_olm_bundle (name, package_name, version, release) VALUES (?, ?, ?, ?)",
-			b.Name, b.Package, version, release)
+		_, err := tx.Exec("INSERT INTO raw_olm_bundle (name, package_name, version, release, image) VALUES (?, ?, ?, ?, ?)",
+			b.Name, b.Package, version, release, b.Image)
 		return err
 	}, nil
 }

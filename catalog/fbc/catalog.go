@@ -95,5 +95,5 @@ var _ catalogv1.Catalog = (*Catalog)(nil)
 var _ catalogv1.CompositeUpdateGraph = (*internal.CompositeUpdateGraphQuery)(nil)
 var _ catalogv1.UpdateGraph = (*internal.UpdateGraphQuery)(nil)
 
-// Ensure NameVersionRelease satisfies bundlev1.Bundle at compile time.
-var _ bundlev1.Bundle = bundlev1.NameVersionRelease{}
+// Ensure BundleRow satisfies bundlev1.Bundle at compile time.
+var _ bundlev1.Bundle = internal.BundleRow{}

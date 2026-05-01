@@ -13,7 +13,7 @@ import (
 type UpdateGraph interface {
 	Name() string
 	ListBundles(ctx context.Context) iter.Seq2[bundlev1.Bundle, error]
-	Successors(ctx context.Context, from bundlev1.Bundle) iter.Seq2[bundlev1.Bundle, error]
+	Successors(ctx context.Context, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error]
 }
 
 // CompositeUpdateGraph is an UpdateGraph composed of named child UpdateGraphs.

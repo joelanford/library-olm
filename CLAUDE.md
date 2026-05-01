@@ -6,7 +6,7 @@ Go library providing reusable building blocks for OLM's core functionality: bund
 
 ```
 bundle/              — bundle types and transformations
-  v1/                — bundle identity types (Release, VersionRelease, Bundle interface)
+  v1/                — bundle identity types (BundleID, NameVersionRelease, Bundle interface)
   registry/v1/       — registry+v1 bundle parsing (FromFS) and rendering (ToPlainManifests)
 catalog/             — catalog API, formats, querying, and indexing
   v1/                — catalog interfaces (UpdateGraph, CompositeUpdateGraph, Catalog)

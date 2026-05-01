@@ -8,6 +8,7 @@ import (
 
 	bsemver "github.com/blang/semver/v4"
 	"github.com/operator-framework/operator-registry/alpha/declcfg"
+	"go.podman.io/image/v5/docker/reference"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 )
@@ -81,15 +82,15 @@ func (h *OLMPackageHandler) insertPackageGraph(tx *sql.Tx, packageName string) (
 }
 
 func (h *OLMPackageHandler) insertBundles(tx *sql.Tx, packageName string) error {
-	rows, err := tx.Query("SELECT name, version, release FROM raw_olm_bundle WHERE package_name = ?", packageName)
+	rows, err := tx.Query("SELECT name, version, release, image FROM raw_olm_bundle WHERE package_name = ?", packageName)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
-		var name, versionStr, releaseStr string
-		if err := rows.Scan(&name, &versionStr, &releaseStr); err != nil {
+		var name, versionStr, releaseStr, image string
+		if err := rows.Scan(&name, &versionStr, &releaseStr, &image); err != nil {
 			return err
 		}
 		if _, err := bsemver.Parse(versionStr); err != nil {
@@ -100,9 +101,22 @@ func (h *OLMPackageHandler) insertBundles(tx *sql.Tx, packageName string) error 
 				return fmt.Errorf("parse release %q for bundle %q: %w", releaseStr, name, err)
 			}
 		}
+		if image == "" {
+			return fmt.Errorf("bundle %q has no image", name)
+		}
+		ref, err := reference.ParseNamed(image)
+		if err != nil {
+			return fmt.Errorf("parse image %q for bundle %q: %w", image, name, err)
+		}
+		if _, ok := ref.(reference.NamedTagged); !ok {
+			if _, ok := ref.(reference.Canonical); !ok {
+				return fmt.Errorf("image %q for bundle %q must be tagged or canonical", image, name)
+			}
+		}
+		uri := "docker://" + ref.String()
 		if _, err := tx.Exec(
-			"INSERT OR IGNORE INTO bundles (id, version, release) VALUES (?, ?, ?)",
-			name, versionStr, releaseStr,
+			"INSERT OR IGNORE INTO bundles (id, package_name, version, release, uri) VALUES (?, ?, ?, ?, ?)",
+			name, packageName, versionStr, releaseStr, uri,
 		); err != nil {
 			return err
 		}

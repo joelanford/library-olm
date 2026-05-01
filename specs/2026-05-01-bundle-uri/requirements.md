@@ -6,7 +6,9 @@
 - `NameVersionRelease` no longer implements `Bundle`
 - `catalogv1.UpdateGraph.Successors` accepts `bundlev1.BundleID` instead of `bundlev1.Bundle`
 - FBC ingest stores the raw image reference from `declcfg.Bundle.Image` (no scheme prefix) in `raw_olm_bundle.image`
+- FBC handler validates the image field during normalization: must be non-empty and parse as a NamedTagged or Canonical docker reference
 - FBC handler prepends the `docker://` scheme during normalization when writing to the `bundles.uri` column
+- Bundles with missing or invalid image references cause a per-package error (soft fail)
 - FBC normalized `bundles` table includes `package_name` and `uri` columns
 - FBC query layer returns bundles implementing the full `Bundle` interface with URI populated
 - FBC successor queries use `BundleID` directly as the lookup key

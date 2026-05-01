@@ -12,6 +12,21 @@ import (
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
+// BundleRow implements bundlev1.Bundle backed by a row from the normalized bundles table.
+type BundleRow struct {
+	BundleID    bundlev1.BundleID
+	PackageName string
+	Version     bsemver.Version
+	Release     bundlev1.Release
+	BundleURI   string
+}
+
+func (b BundleRow) ID() bundlev1.BundleID { return b.BundleID }
+func (b BundleRow) NameVersionRelease() bundlev1.NameVersionRelease {
+	return bundlev1.NameVersionRelease{Name: b.PackageName, Version: b.Version, Release: b.Release}
+}
+func (b BundleRow) URI() string { return b.BundleURI }
+
 // CatalogQuery implements catalogv1.Catalog backed by normalized SQLite tables.
 type CatalogQuery struct {
 	DB *sql.DB
@@ -69,7 +84,7 @@ func (g *CompositeUpdateGraphQuery) ListBundles(ctx context.Context) iter.Seq2[b
 	return queryBundlesDescendant(ctx, g.DB, g.GraphID)
 }
 
-func (g *CompositeUpdateGraphQuery) Successors(ctx context.Context, from bundlev1.Bundle) iter.Seq2[bundlev1.Bundle, error] {
+func (g *CompositeUpdateGraphQuery) Successors(ctx context.Context, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error] {
 	return querySuccessorsDescendant(ctx, g.DB, g.GraphID, from)
 }
 
@@ -125,14 +140,14 @@ func (g *UpdateGraphQuery) ListBundles(ctx context.Context) iter.Seq2[bundlev1.B
 	return queryBundlesDirect(ctx, g.DB, g.GraphID)
 }
 
-func (g *UpdateGraphQuery) Successors(ctx context.Context, from bundlev1.Bundle) iter.Seq2[bundlev1.Bundle, error] {
+func (g *UpdateGraphQuery) Successors(ctx context.Context, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error] {
 	return querySuccessorsDirect(ctx, g.DB, g.GraphID, from)
 }
 
 func queryBundlesDirect(ctx context.Context, db *sql.DB, graphID int64) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
 		rows, err := db.QueryContext(ctx, `
-			SELECT b.id, b.version, b.release
+			SELECT b.id, b.package_name, b.version, b.release, b.uri
 			FROM graph_bundles gb
 			JOIN bundles b ON b.id = gb.bundle_id
 			WHERE gb.graph_id = ? AND b.version != ''
@@ -154,7 +169,7 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, graphID int64) iter
 				UNION ALL
 				SELECT g.id FROM graphs g JOIN descendants d ON g.parent_id = d.id
 			)
-			SELECT DISTINCT b.id, b.version, b.release
+			SELECT DISTINCT b.id, b.package_name, b.version, b.release, b.uri
 			FROM graph_bundles gb
 			JOIN bundles b ON b.id = gb.bundle_id
 			WHERE gb.graph_id IN (SELECT id FROM descendants) AND b.version != ''
@@ -168,14 +183,14 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, graphID int64) iter
 	}
 }
 
-func querySuccessorsDirect(ctx context.Context, db *sql.DB, graphID int64, from bundlev1.Bundle) iter.Seq2[bundlev1.Bundle, error] {
+func querySuccessorsDirect(ctx context.Context, db *sql.DB, graphID int64, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
 		rows, err := db.QueryContext(ctx, `
-			SELECT b.id, b.version, b.release
+			SELECT b.id, b.package_name, b.version, b.release, b.uri
 			FROM successors s
 			JOIN bundles b ON b.id = s.to_bundle_id
 			WHERE s.graph_id = ? AND s.from_bundle_id = ?
-			ORDER BY b.id`, graphID, from.Name())
+			ORDER BY b.id`, graphID, string(from))
 		if err != nil {
 			yield(nil, err)
 			return
@@ -185,7 +200,7 @@ func querySuccessorsDirect(ctx context.Context, db *sql.DB, graphID int64, from 
 	}
 }
 
-func querySuccessorsDescendant(ctx context.Context, db *sql.DB, graphID int64, from bundlev1.Bundle) iter.Seq2[bundlev1.Bundle, error] {
+func querySuccessorsDescendant(ctx context.Context, db *sql.DB, graphID int64, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
 		rows, err := db.QueryContext(ctx, `
 			WITH RECURSIVE descendants(id) AS (
@@ -193,11 +208,11 @@ func querySuccessorsDescendant(ctx context.Context, db *sql.DB, graphID int64, f
 				UNION ALL
 				SELECT g.id FROM graphs g JOIN descendants d ON g.parent_id = d.id
 			)
-			SELECT DISTINCT b.id, b.version, b.release
+			SELECT DISTINCT b.id, b.package_name, b.version, b.release, b.uri
 			FROM successors s
 			JOIN bundles b ON b.id = s.to_bundle_id
 			WHERE s.graph_id IN (SELECT id FROM descendants) AND s.from_bundle_id = ?
-			ORDER BY b.id`, graphID, from.Name())
+			ORDER BY b.id`, graphID, string(from))
 		if err != nil {
 			yield(nil, err)
 			return
@@ -209,8 +224,8 @@ func querySuccessorsDescendant(ctx context.Context, db *sql.DB, graphID int64, f
 
 func yieldBundleRows(rows *sql.Rows, yield func(bundlev1.Bundle, error) bool) {
 	for rows.Next() {
-		var name, versionStr, releaseStr string
-		if err := rows.Scan(&name, &versionStr, &releaseStr); err != nil {
+		var id, packageName, versionStr, releaseStr, uri string
+		if err := rows.Scan(&id, &packageName, &versionStr, &releaseStr, &uri); err != nil {
 			if !yield(nil, err) {
 				return
 			}
@@ -228,7 +243,13 @@ func yieldBundleRows(rows *sql.Rows, yield func(bundlev1.Bundle, error) bool) {
 			}
 		}
 		rel := bundlev1.MustParseRelease(releaseStr)
-		b := bundlev1.NameVersionRelease{BundleName: name, Version: ver, Release: rel}
+		b := BundleRow{
+			BundleID:    bundlev1.BundleID(id),
+			PackageName: packageName,
+			Version:     ver,
+			Release:     rel,
+			BundleURI:   uri,
+		}
 		if !yield(b, nil) {
 			return
 		}

@@ -6,19 +6,25 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"go.podman.io/image/v5/docker"
 	"go.podman.io/image/v5/types"
 
+	registryv1 "github.com/joelanford/library-olm/bundle/registry/v1"
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	"github.com/joelanford/library-olm/catalog/fbc"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 	"github.com/joelanford/library-olm/image"
+	imgbundle "github.com/joelanford/library-olm/image/bundle"
 	imgcatalog "github.com/joelanford/library-olm/image/catalog"
 )
 
-const catalogImage = "//quay.io/operatorhubio/catalog:latest"
+const catalogImage = "docker://quay.io/operatorhubio/catalog:latest"
+
+const dockerScheme = "docker://"
 
 func main() {
 	if err := run(); err != nil {
@@ -36,9 +42,13 @@ func run() error {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	log.Printf("Extracting %s to %s", catalogImage, tmpDir)
+	catalogDir := filepath.Join(tmpDir, "catalog")
+	if err := os.MkdirAll(catalogDir, 0o755); err != nil {
+		return fmt.Errorf("create catalog dir: %w", err)
+	}
+	log.Printf("Extracting %s to %s", catalogImage, catalogDir)
 	start := time.Now()
-	if err := extractCatalogImage(ctx, tmpDir); err != nil {
+	if err := unpackImage(ctx, catalogImage, &imgcatalog.FBCHandler{}, catalogDir); err != nil {
 		return fmt.Errorf("extract catalog image: %w", err)
 	}
 	log.Printf("Extracted catalog image in %s", time.Since(start))
@@ -46,7 +56,7 @@ func run() error {
 	// Step 2: Open the extracted catalog as an FBC Catalog
 	log.Println("Loading catalog from filesystem into SQLite...")
 	start = time.Now()
-	cat, err := fbc.FromFS(ctx, os.DirFS(tmpDir))
+	cat, err := fbc.FromFS(ctx, os.DirFS(catalogDir))
 	if err != nil {
 		if cat == nil {
 			return fmt.Errorf("load catalog: %w", err)
@@ -143,23 +153,25 @@ func run() error {
 
 		first, last := "", ""
 		if chFirstBundle != nil {
-			first = fmt.Sprintf("%s (%s)", chFirstBundle.Name(), chFirstBundle.VersionRelease().Version)
+			nvr := chFirstBundle.NameVersionRelease()
+			first = fmt.Sprintf("%s (%s)", chFirstBundle.ID(), nvr.Version)
 		}
 		if chLastBundle != nil {
-			last = fmt.Sprintf("%s (%s)", chLastBundle.Name(), chLastBundle.VersionRelease().Version)
+			nvr := chLastBundle.NameVersionRelease()
+			last = fmt.Sprintf("%s (%s)", chLastBundle.ID(), nvr.Version)
 		}
 		log.Printf("  Channel %q: %d bundles, first=%s, last=%s", chName, chBundleCount, first, last)
 
 		// Successors from oldest bundle in this channel
 		if chFirstBundle != nil {
 			var successorCount int
-			for _, err := range ch.Successors(ctx, chFirstBundle) {
+			for _, err := range ch.Successors(ctx, chFirstBundle.ID()) {
 				if err != nil {
 					return fmt.Errorf("successors in channel %q: %w", chName, err)
 				}
 				successorCount++
 			}
-			log.Printf("    %d successors from %s", successorCount, chFirstBundle.Name())
+			log.Printf("    %d successors from %s", successorCount, chFirstBundle.ID())
 		}
 	}
 
@@ -180,14 +192,19 @@ func run() error {
 		if firstBundle != nil {
 			start = time.Now()
 			var count int
-			for _, err := range composite.Successors(ctx, firstBundle) {
+			for _, err := range composite.Successors(ctx, firstBundle.ID()) {
 				if err != nil {
 					return fmt.Errorf("successors (package): %w", err)
 				}
 				count++
 			}
-			log.Printf("Package-level: %d successors from %s in %s", count, firstBundle.Name(), time.Since(start))
+			log.Printf("Package-level: %d successors from %s in %s", count, firstBundle.ID(), time.Since(start))
 		}
+	}
+
+	// Unpack a bundle image using its URI, parse as registry+v1, and render to plain manifests
+	if err := unpackAndRenderBundle(ctx, composite, tmpDir); err != nil {
+		return fmt.Errorf("unpack and render bundle: %w", err)
 	}
 
 	// GetPackage for unknown package (error case)
@@ -240,10 +257,57 @@ func findInterestingPackage(ctx context.Context, cat *fbc.Catalog, pkgNames []st
 	return bestName, nil
 }
 
-func extractCatalogImage(ctx context.Context, dest string) error {
-	imgRef, err := docker.ParseReference(catalogImage)
+func unpackAndRenderBundle(ctx context.Context, composite catalogv1.CompositeUpdateGraph, tmpDir string) error {
+	var bundle bundlev1.Bundle
+	for b, err := range composite.ListBundles(ctx) {
+		if err != nil {
+			return fmt.Errorf("list bundles: %w", err)
+		}
+		if b.URI() != "" {
+			bundle = b
+			break
+		}
+	}
+	if bundle == nil {
+		log.Println("No bundle with URI found, skipping unpack")
+		return nil
+	}
+
+	log.Printf("Unpacking bundle %s from %s...", bundle.ID(), bundle.URI())
+	bundleDir := filepath.Join(tmpDir, "bundle")
+	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
+		return fmt.Errorf("create bundle dir: %w", err)
+	}
+	start := time.Now()
+	if err := unpackImage(ctx, bundle.URI(), &imgbundle.RegistryV1Handler{}, bundleDir); err != nil {
+		return fmt.Errorf("unpack bundle image: %w", err)
+	}
+	log.Printf("Unpacked bundle in %s", time.Since(start))
+
+	regBundle, err := registryv1.FromFS(os.DirFS(bundleDir))
 	if err != nil {
-		return fmt.Errorf("parse reference: %w", err)
+		return fmt.Errorf("parse registry+v1 bundle: %w", err)
+	}
+	log.Printf("Parsed registry+v1 bundle: %s (CSV: %s)", bundle.ID(), regBundle.CSV.GetName())
+
+	objects, err := registryv1.ToPlainManifests(regBundle, "default")
+	if err != nil {
+		return fmt.Errorf("render plain manifests: %w", err)
+	}
+	log.Printf("Rendered %d plain manifests for namespace %q", len(objects), "default")
+	for _, obj := range objects {
+		log.Printf("  %s %s/%s", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetNamespace(), obj.GetName())
+	}
+	return nil
+}
+
+func unpackImage(ctx context.Context, uri string, handler image.Handler, dest string) error {
+	if !strings.HasPrefix(uri, dockerScheme) {
+		return fmt.Errorf("unsupported URI scheme in %q (expected %s)", uri, dockerScheme)
+	}
+	imgRef, err := docker.ParseReference("//" + strings.TrimPrefix(uri, dockerScheme))
+	if err != nil {
+		return fmt.Errorf("parse reference %q: %w", uri, err)
 	}
 
 	client, err := image.NewContainersImageClient(ctx, imgRef, &types.SystemContext{})
@@ -262,13 +326,12 @@ func extractCatalogImage(ctx context.Context, dest string) error {
 		return fmt.Errorf("fetch manifest: %w", err)
 	}
 
-	handler := &imgcatalog.FBCHandler{}
 	matches, err := handler.Matches(ctx, client, desc, manifestBytes)
 	if err != nil {
 		return fmt.Errorf("matches: %w", err)
 	}
 	if !matches {
-		return fmt.Errorf("image does not match FBC handler")
+		return fmt.Errorf("image %q does not match handler %q", uri, handler.Name())
 	}
 
 	return handler.Unpack(ctx, client, desc, manifestBytes, dest)
