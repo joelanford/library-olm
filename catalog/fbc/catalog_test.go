@@ -3,7 +3,6 @@ package fbc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"testing"
 	"testing/fstest"
@@ -12,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
+	"github.com/joelanford/library-olm/catalog/fbc/internal/testing/catalogfs"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
@@ -158,14 +158,15 @@ func TestFromFS_SkipRange(t *testing.T) {
 }
 
 func TestFromFS_SkipsWithPhantomBundle(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("skip-op") +
-				fbcChannel("skip-op", "stable", `[{"name":"skip-op.v1.0.0"},{"name":"skip-op.v2.0.0","skips":["skip-op.v0.9.0"]}]`) +
-				fbcBundle("skip-op", "skip-op.v1.0.0", "1.0.0") +
-				fbcBundle("skip-op", "skip-op.v2.0.0", "2.0.0"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("skip-op").
+		WithChannel("skip-op", "stable",
+			catalogfs.Entry("1.0.0"),
+			catalogfs.Entry("2.0.0", catalogfs.Skips("0.9.0")),
+		).
+		WithBundle("skip-op", "1.0.0").
+		WithBundle("skip-op", "2.0.0").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.NoError(t, err)
@@ -182,13 +183,13 @@ func TestFromFS_SkipsWithPhantomBundle(t *testing.T) {
 }
 
 func TestFromFS_DanglingReplaces(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("repl-op") +
-				fbcChannel("repl-op", "stable", `[{"name":"repl-op.v1.0.0","replaces":"repl-op.v0.1.0"}]`) +
-				fbcBundle("repl-op", "repl-op.v1.0.0", "1.0.0"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("repl-op").
+		WithChannel("repl-op", "stable",
+			catalogfs.Entry("1.0.0", catalogfs.Replaces("0.1.0")),
+		).
+		WithBundle("repl-op", "1.0.0").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.NoError(t, err)
@@ -205,16 +206,14 @@ func TestFromFS_DanglingReplaces(t *testing.T) {
 }
 
 func TestFromFS_MultiplePackages(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("alpha-op") +
-				fbcChannel("alpha-op", "stable", `[{"name":"alpha-op.v1.0.0"}]`) +
-				fbcBundle("alpha-op", "alpha-op.v1.0.0", "1.0.0") +
-				fbcPackage("beta-op") +
-				fbcChannel("beta-op", "stable", `[{"name":"beta-op.v2.0.0"}]`) +
-				fbcBundle("beta-op", "beta-op.v2.0.0", "2.0.0"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("alpha-op").
+		WithPackage("beta-op").
+		WithChannel("alpha-op", "stable", catalogfs.Entry("1.0.0")).
+		WithChannel("beta-op", "stable", catalogfs.Entry("2.0.0")).
+		WithBundle("alpha-op", "1.0.0").
+		WithBundle("beta-op", "2.0.0").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.NoError(t, err)
@@ -240,14 +239,12 @@ func TestFromFS_MultiplePackages(t *testing.T) {
 }
 
 func TestFromFS_UnknownSchemasIgnored(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("my-op") +
-				`{"schema":"olm.custom.thing","package":"my-op","name":"whatever"}` + "\n" +
-				fbcChannel("my-op", "stable", `[{"name":"my-op.v1.0.0"}]`) +
-				fbcBundle("my-op", "my-op.v1.0.0", "1.0.0"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("my-op").
+		WithCustom("my-op", "olm.custom.thing", "whatever").
+		WithChannel("my-op", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("my-op", "1.0.0").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.NoError(t, err)
@@ -259,14 +256,15 @@ func TestFromFS_UnknownSchemasIgnored(t *testing.T) {
 }
 
 func TestFromFS_InvalidSkipRange(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("bad-op") +
-				fbcChannel("bad-op", "stable", `[{"name":"bad-op.v1.0.0"},{"name":"bad-op.v2.0.0","skipRange":"<=v1.0.0"}]`) +
-				fbcBundle("bad-op", "bad-op.v1.0.0", "1.0.0") +
-				fbcBundle("bad-op", "bad-op.v2.0.0", "2.0.0"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("bad-op").
+		WithChannel("bad-op", "stable",
+			catalogfs.Entry("1.0.0"),
+			catalogfs.Entry("2.0.0", catalogfs.SkipRange("<=v1.0.0")),
+		).
+		WithBundle("bad-op", "1.0.0").
+		WithBundle("bad-op", "2.0.0").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -278,14 +276,15 @@ func TestFromFS_InvalidSkipRange(t *testing.T) {
 }
 
 func TestFromFS_PreReleaseVersion(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("pre-op") +
-				fbcChannel("pre-op", "stable", `[{"name":"pre-op.v1.0.0-rc1"},{"name":"pre-op.v1.0.0","skipRange":">=0.9.0 <1.0.0"}]`) +
-				fbcBundle("pre-op", "pre-op.v1.0.0-rc1", "1.0.0-rc1") +
-				fbcBundle("pre-op", "pre-op.v1.0.0", "1.0.0"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("pre-op").
+		WithChannel("pre-op", "stable",
+			catalogfs.Entry("1.0.0-rc1"),
+			catalogfs.Entry("1.0.0", catalogfs.SkipRange(">=0.9.0 <1.0.0")),
+		).
+		WithBundle("pre-op", "1.0.0-rc1").
+		WithBundle("pre-op", "1.0.0").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.NoError(t, err)
@@ -315,13 +314,11 @@ func TestFromFS_PreReleaseVersion(t *testing.T) {
 }
 
 func TestFromFS_BundleWithRelease(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("rel-op") +
-				fbcChannel("rel-op", "stable", `[{"name":"rel-op.v1.0.0"}]`) +
-				fbcBundleWithRelease("rel-op", "rel-op.v1.0.0", "1.0.0", "rc1"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("rel-op").
+		WithChannel("rel-op", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("rel-op", "1.0.0", catalogfs.WithRelease("rc1")).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.NoError(t, err)
@@ -343,13 +340,11 @@ func TestFromFS_BundleWithRelease(t *testing.T) {
 }
 
 func TestFromFS_InvalidBundleRelease(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("bad-rel") +
-				fbcChannel("bad-rel", "stable", `[{"name":"bad-rel.v1.0.0"}]`) +
-				fbcBundleWithRelease("bad-rel", "bad-rel.v1.0.0", "1.0.0", "rc@1"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("bad-rel").
+		WithChannel("bad-rel", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("bad-rel", "1.0.0", catalogfs.WithRelease("rc@1")).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -361,13 +356,11 @@ func TestFromFS_InvalidBundleRelease(t *testing.T) {
 }
 
 func TestFromFS_MissingPackageProperty(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("no-prop") +
-				fbcChannel("no-prop", "stable", `[{"name":"no-prop.v1.0.0"}]`) +
-				"{\"schema\":\"olm.bundle\",\"package\":\"no-prop\",\"name\":\"no-prop.v1.0.0\",\"properties\":[]}\n",
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("no-prop").
+		WithChannel("no-prop", "stable", catalogfs.Entry("1.0.0")).
+		WithCustom("no-prop", "olm.bundle", "no-prop.v1.0.0", "properties", []any{}).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -379,13 +372,11 @@ func TestFromFS_MissingPackageProperty(t *testing.T) {
 }
 
 func TestFromFS_InvalidBundleVersion(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("bad-ver") +
-				fbcChannel("bad-ver", "stable", `[{"name":"bad-ver.v1.0.0"}]`) +
-				fbcBundle("bad-ver", "bad-ver.v1.0.0", "not-semver"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("bad-ver").
+		WithChannel("bad-ver", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("bad-ver", "not-semver", catalogfs.WithName("bad-ver.v1.0.0")).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -414,13 +405,10 @@ func TestFromFS_SuccessorsUnknownBundle(t *testing.T) {
 }
 
 func TestFromFS_MissingBundle(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("bad-operator") +
-				fbcChannel("bad-operator", "stable", `[{"name":"missing.v1.0.0"}]`) +
-				"",
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("bad-operator").
+		WithChannel("bad-operator", "stable", catalogfs.Entry("1.0.0")).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -432,7 +420,7 @@ func TestFromFS_MissingBundle(t *testing.T) {
 }
 
 func TestFromFS_EmptyFS(t *testing.T) {
-	fsys := fstest.MapFS{}
+	fsys := catalogfs.Builder().Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.NoError(t, err)
@@ -475,13 +463,11 @@ func TestFromFS_BundleURI(t *testing.T) {
 }
 
 func TestFromFS_BundleWithoutImage(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("no-img") +
-				fbcChannel("no-img", "stable", `[{"name":"no-img.v1.0.0"}]`) +
-				fbcBundleNoImage("no-img", "no-img.v1.0.0", "1.0.0"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("no-img").
+		WithChannel("no-img", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("no-img", "1.0.0", catalogfs.WithImage("")).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -493,13 +479,11 @@ func TestFromFS_BundleWithoutImage(t *testing.T) {
 }
 
 func TestFromFS_BundleWithInvalidImage(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("bad-img") +
-				fbcChannel("bad-img", "stable", `[{"name":"bad-img.v1.0.0"}]`) +
-				`{"schema":"olm.bundle","package":"bad-img","name":"bad-img.v1.0.0","image":"INVALID:::ref","properties":[{"type":"olm.package","value":{"packageName":"bad-img","version":"1.0.0"}}]}` + "\n",
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("bad-img").
+		WithChannel("bad-img", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("bad-img", "1.0.0", catalogfs.WithImage("INVALID:::ref")).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -511,13 +495,11 @@ func TestFromFS_BundleWithInvalidImage(t *testing.T) {
 }
 
 func TestFromFS_BundleWithUntaggedImage(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("untag") +
-				fbcChannel("untag", "stable", `[{"name":"untag.v1.0.0"}]`) +
-				`{"schema":"olm.bundle","package":"untag","name":"untag.v1.0.0","image":"quay.io/foo/bar","properties":[{"type":"olm.package","value":{"packageName":"untag","version":"1.0.0"}}]}` + "\n",
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("untag").
+		WithChannel("untag", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("untag", "1.0.0", catalogfs.WithImage("quay.io/foo/bar")).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -529,13 +511,11 @@ func TestFromFS_BundleWithUntaggedImage(t *testing.T) {
 }
 
 func TestFromFS_BundleWithUnqualifiedImage(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("short") +
-				fbcChannel("short", "stable", `[{"name":"short.v1.0.0"}]`) +
-				`{"schema":"olm.bundle","package":"short","name":"short.v1.0.0","image":"busybox:latest","properties":[{"type":"olm.package","value":{"packageName":"short","version":"1.0.0"}}]}` + "\n",
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("short").
+		WithChannel("short", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("short", "1.0.0", catalogfs.WithImage("busybox:latest")).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -557,52 +537,34 @@ func collectBundleIDs(t *testing.T, seq func(func(bundlev1.Bundle, error) bool))
 }
 
 func validCatalogFS() fstest.MapFS {
-	return fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("my-operator") +
-				fbcChannel("my-operator", "stable", `[{"name":"my-operator.v1.0.0"},{"name":"my-operator.v1.1.0","replaces":"my-operator.v1.0.0"}]`) +
-				fbcChannel("my-operator", "fast", `[{"name":"my-operator.v1.0.0"},{"name":"my-operator.v1.2.0","replaces":"my-operator.v1.0.0"}]`) +
-				fbcBundle("my-operator", "my-operator.v1.0.0", "1.0.0") +
-				fbcBundle("my-operator", "my-operator.v1.1.0", "1.1.0") +
-				fbcBundle("my-operator", "my-operator.v1.2.0", "1.2.0"),
-		)},
-	}
+	return catalogfs.Builder().
+		WithPackage("my-operator").
+		WithChannel("my-operator", "stable",
+			catalogfs.Entry("1.0.0"),
+			catalogfs.Entry("1.1.0", catalogfs.Replaces("1.0.0")),
+		).
+		WithChannel("my-operator", "fast",
+			catalogfs.Entry("1.0.0"),
+			catalogfs.Entry("1.2.0", catalogfs.Replaces("1.0.0")),
+		).
+		WithBundle("my-operator", "1.0.0").
+		WithBundle("my-operator", "1.1.0").
+		WithBundle("my-operator", "1.2.0").
+		Build()
 }
 
 func skipRangeCatalogFS() fstest.MapFS {
-	return fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("skip-operator") +
-				fbcChannel("skip-operator", "stable",
-					`[{"name":"skip-operator.v1.0.0"},{"name":"skip-operator.v1.5.0","replaces":"skip-operator.v1.0.0"},{"name":"skip-operator.v2.0.0","replaces":"skip-operator.v1.5.0","skipRange":">=1.0.0 <2.0.0"}]`) +
-				fbcBundle("skip-operator", "skip-operator.v1.0.0", "1.0.0") +
-				fbcBundle("skip-operator", "skip-operator.v1.5.0", "1.5.0") +
-				fbcBundle("skip-operator", "skip-operator.v2.0.0", "2.0.0"),
-		)},
-	}
-}
-
-func fbcPackage(name string) string {
-	return fmt.Sprintf("{\"schema\":\"olm.package\",\"name\":\"%s\"}\n", name)
-}
-
-func fbcChannel(pkg, name, entries string) string {
-	return fmt.Sprintf("{\"schema\":\"olm.channel\",\"package\":\"%s\",\"name\":\"%s\",\"entries\":%s}\n", pkg, name, entries)
-}
-
-func fbcBundle(pkg, name, version string) string {
-	return fmt.Sprintf("{\"schema\":\"olm.bundle\",\"package\":\"%s\",\"name\":\"%s\",\"image\":\"quay.io/%s/bundle:v%s\",\"properties\":[{\"type\":\"olm.package\",\"value\":{\"packageName\":\"%s\",\"version\":\"%s\"}}]}\n",
-		pkg, name, pkg, version, pkg, version)
-}
-
-func fbcBundleWithRelease(pkg, name, version, release string) string {
-	return fmt.Sprintf("{\"schema\":\"olm.bundle\",\"package\":\"%s\",\"name\":\"%s\",\"image\":\"quay.io/%s/bundle:v%s\",\"properties\":[{\"type\":\"olm.package\",\"value\":{\"packageName\":\"%s\",\"version\":\"%s\",\"release\":\"%s\"}}]}\n",
-		pkg, name, pkg, version, pkg, version, release)
-}
-
-func fbcBundleNoImage(pkg, name, version string) string {
-	return fmt.Sprintf("{\"schema\":\"olm.bundle\",\"package\":\"%s\",\"name\":\"%s\",\"properties\":[{\"type\":\"olm.package\",\"value\":{\"packageName\":\"%s\",\"version\":\"%s\"}}]}\n",
-		pkg, name, pkg, version)
+	return catalogfs.Builder().
+		WithPackage("skip-operator").
+		WithChannel("skip-operator", "stable",
+			catalogfs.Entry("1.0.0"),
+			catalogfs.Entry("1.5.0", catalogfs.Replaces("1.0.0")),
+			catalogfs.Entry("2.0.0", catalogfs.Replaces("1.5.0"), catalogfs.SkipRange(">=1.0.0 <2.0.0")),
+		).
+		WithBundle("skip-operator", "1.0.0").
+		WithBundle("skip-operator", "1.5.0").
+		WithBundle("skip-operator", "2.0.0").
+		Build()
 }
 
 func requirePackageError(t *testing.T, err error, pkg string, msgSubstring string) {
@@ -629,16 +591,14 @@ func assertEmptyCatalog(t *testing.T, ctx context.Context, cat *Catalog) {
 }
 
 func TestFromFS_MixedValidAndMalformed(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("good-op") +
-				fbcChannel("good-op", "stable", `[{"name":"good-op.v1.0.0"}]`) +
-				fbcBundle("good-op", "good-op.v1.0.0", "1.0.0") +
-				fbcPackage("bad-op") +
-				fbcChannel("bad-op", "stable", `[{"name":"bad-op.v1.0.0"}]`) +
-				fbcBundle("bad-op", "bad-op.v1.0.0", "not-semver"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("good-op").
+		WithPackage("bad-op").
+		WithChannel("good-op", "stable", catalogfs.Entry("1.0.0")).
+		WithChannel("bad-op", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("good-op", "1.0.0").
+		WithBundle("bad-op", "not-semver", catalogfs.WithName("bad-op.v1.0.0")).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -659,16 +619,14 @@ func TestFromFS_MixedValidAndMalformed(t *testing.T) {
 }
 
 func TestFromFS_AllMalformed(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("bad1") +
-				fbcChannel("bad1", "stable", `[{"name":"bad1.v1.0.0"}]`) +
-				fbcBundle("bad1", "bad1.v1.0.0", "not-semver") +
-				fbcPackage("bad2") +
-				fbcChannel("bad2", "stable", `[{"name":"bad2.v1.0.0","skipRange":"<=bad"}]`) +
-				fbcBundle("bad2", "bad2.v1.0.0", "1.0.0"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("bad1").
+		WithPackage("bad2").
+		WithChannel("bad1", "stable", catalogfs.Entry("1.0.0")).
+		WithChannel("bad2", "stable", catalogfs.Entry("1.0.0", catalogfs.SkipRange("<=bad"))).
+		WithBundle("bad1", "not-semver", catalogfs.WithName("bad1.v1.0.0")).
+		WithBundle("bad2", "1.0.0").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -681,11 +639,9 @@ func TestFromFS_AllMalformed(t *testing.T) {
 }
 
 func TestFromFS_MalformedPackageBlob(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			`{"schema":"olm.package","name":"bad-pkg","icon":"not-an-object"}` + "\n",
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithCustom("", "olm.package", "bad-pkg", "icon", "not-an-object").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -694,13 +650,11 @@ func TestFromFS_MalformedPackageBlob(t *testing.T) {
 }
 
 func TestFromFS_MalformedChannelBlob(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("ch-op") +
-				`{"schema":"olm.channel","package":"ch-op","name":"stable","entries":"not-an-array"}` + "\n" +
-				fbcBundle("ch-op", "ch-op.v1.0.0", "1.0.0"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("ch-op").
+		WithCustom("ch-op", "olm.channel", "stable", "entries", "not-an-array").
+		WithBundle("ch-op", "1.0.0").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -712,13 +666,11 @@ func TestFromFS_MalformedChannelBlob(t *testing.T) {
 }
 
 func TestFromFS_MalformedBundleBlob(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("b-op") +
-				fbcChannel("b-op", "stable", `[{"name":"b-op.v1.0.0"}]`) +
-				`{"schema":"olm.bundle","package":"b-op","name":"b-op.v1.0.0","properties":"not-an-array"}` + "\n",
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("b-op").
+		WithChannel("b-op", "stable", catalogfs.Entry("1.0.0")).
+		WithCustom("b-op", "olm.bundle", "b-op.v1.0.0", "properties", "not-an-array").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -730,11 +682,9 @@ func TestFromFS_MalformedBundleBlob(t *testing.T) {
 }
 
 func TestFromFS_MalformedBlobEmptyPackage(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			`{"schema":"olm.channel","name":"stable","entries":"not-an-array"}` + "\n",
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithCustom("", "olm.channel", "stable", "entries", "not-an-array").
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
@@ -743,13 +693,11 @@ func TestFromFS_MalformedBlobEmptyPackage(t *testing.T) {
 }
 
 func TestFromFS_PackageErrorUnwrap(t *testing.T) {
-	fsys := fstest.MapFS{
-		"catalog.json": &fstest.MapFile{Data: []byte(
-			fbcPackage("bad-op") +
-				fbcChannel("bad-op", "stable", `[{"name":"bad-op.v1.0.0"}]`) +
-				fbcBundle("bad-op", "bad-op.v1.0.0", "not-semver"),
-		)},
-	}
+	fsys := catalogfs.Builder().
+		WithPackage("bad-op").
+		WithChannel("bad-op", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("bad-op", "not-semver", catalogfs.WithName("bad-op.v1.0.0")).
+		Build()
 	ctx := context.Background()
 	cat, err := FromFS(ctx, fsys)
 	require.Error(t, err)
