@@ -11,7 +11,7 @@ type NormalizeResult struct {
 }
 
 func Normalize(ctx context.Context, db *sql.DB, registry *HandlerRegistry, skipPackages map[string]bool) (*NormalizeResult, error) {
-	rows, err := db.QueryContext(ctx, "SELECT package_name FROM raw_olm_package")
+	rows, err := db.QueryContext(ctx, "SELECT package_name FROM "+TableRawPackage)
 	if err != nil {
 		return nil, fmt.Errorf("listing packages: %w", err)
 	}

@@ -57,21 +57,35 @@ func createTables(db *sql.DB) error {
 	return err
 }
 
-const schemaSQL = `
+const (
+	TableRawPackage      = "raw_olm_package"
+	TableRawChannel      = "raw_olm_channel"
+	TableRawChannelEntry = "raw_olm_channel_entry"
+	TableRawBundle       = "raw_olm_bundle"
+)
+
+var RawTables = []string{
+	TableRawPackage,
+	TableRawChannel,
+	TableRawChannelEntry,
+	TableRawBundle,
+}
+
+var schemaSQL = `
 -- Raw tables (phase 1 ingest)
 -- Table names derived from FBC schema strings: replace "." with "_", prefix "raw_"
 
-CREATE TABLE raw_olm_package (
+CREATE TABLE ` + TableRawPackage + ` (
     package_name TEXT NOT NULL PRIMARY KEY
 );
 
-CREATE TABLE raw_olm_channel (
+CREATE TABLE ` + TableRawChannel + ` (
     name         TEXT NOT NULL,
     package_name TEXT NOT NULL,
     PRIMARY KEY (package_name, name)
 );
 
-CREATE TABLE raw_olm_channel_entry (
+CREATE TABLE ` + TableRawChannelEntry + ` (
     channel_name TEXT NOT NULL,
     package_name TEXT NOT NULL,
     bundle_name  TEXT NOT NULL,
@@ -81,7 +95,7 @@ CREATE TABLE raw_olm_channel_entry (
     PRIMARY KEY (package_name, channel_name, bundle_name)
 );
 
-CREATE TABLE raw_olm_bundle (
+CREATE TABLE ` + TableRawBundle + ` (
     name         TEXT NOT NULL,
     package_name TEXT NOT NULL,
     version      TEXT NOT NULL,

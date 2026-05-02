@@ -45,10 +45,10 @@ func (h *OLMPackageHandler) Normalize(ctx context.Context, tx *sql.Tx, packageNa
 func (h *OLMPackageHandler) validate(tx *sql.Tx, packageName string) error {
 	rows, err := tx.Query(`
 		SELECT ce.channel_name, ce.bundle_name
-		FROM raw_olm_channel_entry ce
+		FROM `+TableRawChannelEntry+` ce
 		WHERE ce.package_name = ?
 		  AND NOT EXISTS (
-		    SELECT 1 FROM raw_olm_bundle b
+		    SELECT 1 FROM `+TableRawBundle+` b
 		    WHERE b.package_name = ce.package_name AND b.name = ce.bundle_name
 		  )`, packageName)
 	if err != nil {
@@ -82,7 +82,7 @@ func (h *OLMPackageHandler) insertPackageGraph(tx *sql.Tx, packageName string) (
 }
 
 func (h *OLMPackageHandler) insertBundles(tx *sql.Tx, packageName string) error {
-	rows, err := tx.Query("SELECT name, version, release, image FROM raw_olm_bundle WHERE package_name = ?", packageName)
+	rows, err := tx.Query("SELECT name, version, release, image FROM "+TableRawBundle+" WHERE package_name = ?", packageName)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func (h *OLMPackageHandler) insertBundles(tx *sql.Tx, packageName string) error 
 }
 
 func (h *OLMPackageHandler) insertChannelGraphsAndEntries(tx *sql.Tx, packageName string, pkgGraphID int64) error {
-	chRows, err := tx.Query("SELECT name FROM raw_olm_channel WHERE package_name = ?", packageName)
+	chRows, err := tx.Query("SELECT name FROM "+TableRawChannel+" WHERE package_name = ?", packageName)
 	if err != nil {
 		return err
 	}
@@ -156,7 +156,7 @@ func (h *OLMPackageHandler) insertChannelGraphsAndEntries(tx *sql.Tx, packageNam
 		if _, err := tx.Exec(`
 			INSERT INTO graph_bundles (graph_id, bundle_id)
 			SELECT ?, ce.bundle_name
-			FROM raw_olm_channel_entry ce
+			FROM `+TableRawChannelEntry+` ce
 			WHERE ce.package_name = ? AND ce.channel_name = ?`,
 			chGraphID, packageName, chName); err != nil {
 			return fmt.Errorf("insert graph_bundles for channel %q: %w", chName, err)
@@ -199,7 +199,7 @@ func (h *OLMPackageHandler) computeSuccessors(tx *sql.Tx, packageName string, pk
 func (h *OLMPackageHandler) computeChannelSuccessors(tx *sql.Tx, packageName string, chGraphID int64, chName string) error {
 	entryRows, err := tx.Query(`
 		SELECT ce.bundle_name, ce.replaces, ce.skips, ce.skip_range
-		FROM raw_olm_channel_entry ce
+		FROM `+TableRawChannelEntry+` ce
 		WHERE ce.package_name = ? AND ce.channel_name = ?`, packageName, chName)
 	if err != nil {
 		return err

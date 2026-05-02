@@ -61,9 +61,9 @@ func FromFS(ctx context.Context, fsys fs.FS) (*Catalog, error) {
 	for pkg := range normalizeResult.PackageErrors {
 		skipPackages[pkg] = true
 	}
-	if err := internal.DeletePackages(ctx, db, skipPackages); err != nil {
+	if err := internal.DropRawTables(ctx, db); err != nil {
 		_ = internal.CloseDB(db, tmpDir)
-		return nil, fmt.Errorf("cleanup failed packages: %w", err)
+		return nil, fmt.Errorf("drop raw tables: %w", err)
 	}
 
 	pkgErr := mergePackageErrors(ingestResult.PackageErrors, normalizeResult.PackageErrors)

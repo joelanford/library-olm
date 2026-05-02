@@ -93,7 +93,7 @@ func parsePackage(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
 		return nil, fmt.Errorf("parse package: %w", err)
 	}
 	return func(tx *sql.Tx) error {
-		_, err := tx.Exec("INSERT INTO raw_olm_package (package_name) VALUES (?)", p.Name)
+		_, err := tx.Exec("INSERT INTO "+TableRawPackage+" (package_name) VALUES (?)", p.Name)
 		return err
 	}, nil
 }
@@ -104,14 +104,14 @@ func parseChannel(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
 		return nil, fmt.Errorf("parse channel: %w", err)
 	}
 	return func(tx *sql.Tx) error {
-		if _, err := tx.Exec("INSERT INTO raw_olm_channel (name, package_name) VALUES (?, ?)",
+		if _, err := tx.Exec("INSERT INTO "+TableRawChannel+" (name, package_name) VALUES (?, ?)",
 			ch.Name, ch.Package); err != nil {
 			return err
 		}
 		for _, entry := range ch.Entries {
 			skips := strings.Join(entry.Skips, ",")
 			if _, err := tx.Exec(
-				"INSERT INTO raw_olm_channel_entry (channel_name, package_name, bundle_name, replaces, skips, skip_range) VALUES (?, ?, ?, ?, ?, ?)",
+				"INSERT INTO "+TableRawChannelEntry+" (channel_name, package_name, bundle_name, replaces, skips, skip_range) VALUES (?, ?, ?, ?, ?, ?)",
 				ch.Name, ch.Package, entry.Name, entry.Replaces, skips, entry.SkipRange,
 			); err != nil {
 				return err
@@ -131,7 +131,7 @@ func parseBundle(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
 		return nil, err
 	}
 	return func(tx *sql.Tx) error {
-		_, err := tx.Exec("INSERT INTO raw_olm_bundle (name, package_name, version, release, image) VALUES (?, ?, ?, ?, ?)",
+		_, err := tx.Exec("INSERT INTO "+TableRawBundle+" (name, package_name, version, release, image) VALUES (?, ?, ?, ?, ?)",
 			b.Name, b.Package, version, release, b.Image)
 		return err
 	}, nil
