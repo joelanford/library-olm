@@ -147,11 +147,11 @@ func (g *UpdateGraphQuery) Successors(ctx context.Context, from bundlev1.BundleI
 func queryBundlesDirect(ctx context.Context, db *sql.DB, graphID int64) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
 		rows, err := db.QueryContext(ctx, `
-			SELECT b.id, b.package_name, b.version, b.release, b.uri
+			SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri
 			FROM graph_bundles gb
 			JOIN bundles b ON b.id = gb.bundle_id
 			WHERE gb.graph_id = ? AND b.version != ''
-			ORDER BY b.id`, graphID)
+			ORDER BY b.bundle_id`, graphID)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -169,11 +169,11 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, graphID int64) iter
 				UNION ALL
 				SELECT g.id FROM graphs g JOIN descendants d ON g.parent_id = d.id
 			)
-			SELECT DISTINCT b.id, b.package_name, b.version, b.release, b.uri
+			SELECT DISTINCT b.bundle_id, b.package_name, b.version, b.release, b.uri
 			FROM graph_bundles gb
 			JOIN bundles b ON b.id = gb.bundle_id
 			WHERE gb.graph_id IN (SELECT id FROM descendants) AND b.version != ''
-			ORDER BY b.id`, graphID)
+			ORDER BY b.bundle_id`, graphID)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -186,11 +186,11 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, graphID int64) iter
 func querySuccessorsDirect(ctx context.Context, db *sql.DB, graphID int64, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
 		rows, err := db.QueryContext(ctx, `
-			SELECT b.id, b.package_name, b.version, b.release, b.uri
+			SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri
 			FROM successors s
 			JOIN bundles b ON b.id = s.to_bundle_id
-			WHERE s.graph_id = ? AND s.from_bundle_id = ?
-			ORDER BY b.id`, graphID, string(from))
+			WHERE s.graph_id = ? AND s.from_bundle_id = (SELECT id FROM bundles WHERE bundle_id = ?)
+			ORDER BY b.bundle_id`, graphID, string(from))
 		if err != nil {
 			yield(nil, err)
 			return
@@ -208,11 +208,11 @@ func querySuccessorsDescendant(ctx context.Context, db *sql.DB, graphID int64, f
 				UNION ALL
 				SELECT g.id FROM graphs g JOIN descendants d ON g.parent_id = d.id
 			)
-			SELECT DISTINCT b.id, b.package_name, b.version, b.release, b.uri
+			SELECT DISTINCT b.bundle_id, b.package_name, b.version, b.release, b.uri
 			FROM successors s
 			JOIN bundles b ON b.id = s.to_bundle_id
-			WHERE s.graph_id IN (SELECT id FROM descendants) AND s.from_bundle_id = ?
-			ORDER BY b.id`, graphID, string(from))
+			WHERE s.graph_id IN (SELECT id FROM descendants) AND s.from_bundle_id = (SELECT id FROM bundles WHERE bundle_id = ?)
+			ORDER BY b.bundle_id`, graphID, string(from))
 		if err != nil {
 			yield(nil, err)
 			return

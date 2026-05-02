@@ -115,7 +115,7 @@ func (h *OLMPackageHandler) insertBundles(tx *sql.Tx, packageName string) error 
 		}
 		uri := "docker://" + ref.String()
 		if _, err := tx.Exec(
-			"INSERT OR IGNORE INTO bundles (id, package_name, version, release, uri) VALUES (?, ?, ?, ?, ?)",
+			"INSERT OR IGNORE INTO bundles (bundle_id, package_name, version, release, uri) VALUES (?, ?, ?, ?, ?)",
 			name, packageName, versionStr, releaseStr, uri,
 		); err != nil {
 			return err
@@ -155,8 +155,9 @@ func (h *OLMPackageHandler) insertChannelGraphsAndEntries(tx *sql.Tx, packageNam
 
 		if _, err := tx.Exec(`
 			INSERT INTO graph_bundles (graph_id, bundle_id)
-			SELECT ?, ce.bundle_name
+			SELECT ?, b.id
 			FROM `+TableRawChannelEntry+` ce
+			JOIN bundles b ON b.bundle_id = ce.bundle_name
 			WHERE ce.package_name = ? AND ce.channel_name = ?`,
 			chGraphID, packageName, chName); err != nil {
 			return fmt.Errorf("insert graph_bundles for channel %q: %w", chName, err)
@@ -261,7 +262,7 @@ func (h *OLMPackageHandler) computeChannelSuccessors(tx *sql.Tx, packageName str
 }
 
 func (h *OLMPackageHandler) ensurePhantomBundle(tx *sql.Tx, bundleName string) error {
-	_, err := tx.Exec("INSERT OR IGNORE INTO bundles (id) VALUES (?)", bundleName)
+	_, err := tx.Exec("INSERT OR IGNORE INTO bundles (bundle_id) VALUES (?)", bundleName)
 	return err
 }
 
@@ -272,10 +273,10 @@ func (h *OLMPackageHandler) computeSkipRangeSuccessors(tx *sql.Tx, chGraphID int
 	}
 
 	rows, err := tx.Query(`
-		SELECT b.id, b.version
+		SELECT b.bundle_id, b.version
 		FROM graph_bundles gb
 		JOIN bundles b ON b.id = gb.bundle_id
-		WHERE gb.graph_id = ? AND b.id != ? AND b.version != ''`, chGraphID, bundleName)
+		WHERE gb.graph_id = ? AND b.bundle_id != ? AND b.version != ''`, chGraphID, bundleName)
 	if err != nil {
 		return err
 	}
@@ -299,9 +300,10 @@ func (h *OLMPackageHandler) computeSkipRangeSuccessors(tx *sql.Tx, chGraphID int
 	return rows.Err()
 }
 
-func (h *OLMPackageHandler) insertSuccessor(tx *sql.Tx, graphID int64, fromBundleID, toBundleID string) error {
-	_, err := tx.Exec(
-		"INSERT OR IGNORE INTO successors (graph_id, from_bundle_id, to_bundle_id) VALUES (?, ?, ?)",
-		graphID, fromBundleID, toBundleID)
+func (h *OLMPackageHandler) insertSuccessor(tx *sql.Tx, graphID int64, fromBundleName, toBundleName string) error {
+	_, err := tx.Exec(`
+		INSERT OR IGNORE INTO successors (graph_id, from_bundle_id, to_bundle_id)
+		VALUES (?, (SELECT id FROM bundles WHERE bundle_id = ?), (SELECT id FROM bundles WHERE bundle_id = ?))`,
+		graphID, fromBundleName, toBundleName)
 	return err
 }

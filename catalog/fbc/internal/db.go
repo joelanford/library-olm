@@ -115,7 +115,8 @@ CREATE TABLE graphs (
 );
 
 CREATE TABLE bundles (
-    id           TEXT NOT NULL PRIMARY KEY,
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    bundle_id    TEXT NOT NULL UNIQUE,
     package_name TEXT NOT NULL DEFAULT '',
     version      TEXT NOT NULL DEFAULT '',
     release      TEXT NOT NULL DEFAULT '',
@@ -124,7 +125,7 @@ CREATE TABLE bundles (
 
 CREATE TABLE graph_bundles (
     graph_id  INTEGER NOT NULL,
-    bundle_id TEXT NOT NULL,
+    bundle_id INTEGER NOT NULL,
     PRIMARY KEY (graph_id, bundle_id),
     FOREIGN KEY (graph_id) REFERENCES graphs(id),
     FOREIGN KEY (bundle_id) REFERENCES bundles(id)
@@ -132,8 +133,8 @@ CREATE TABLE graph_bundles (
 
 CREATE TABLE successors (
     graph_id       INTEGER NOT NULL,
-    from_bundle_id TEXT NOT NULL,
-    to_bundle_id   TEXT NOT NULL,
+    from_bundle_id INTEGER NOT NULL,
+    to_bundle_id   INTEGER NOT NULL,
     PRIMARY KEY (graph_id, from_bundle_id, to_bundle_id),
     FOREIGN KEY (graph_id) REFERENCES graphs(id),
     FOREIGN KEY (from_bundle_id) REFERENCES bundles(id),
