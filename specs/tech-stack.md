@@ -50,7 +50,8 @@ catalog/                         — catalog API, formats, and querying
 image/                           — OCI registry access and content unpacking
   bundle/                        — bundle image handlers (registry+v1, Helm)
   catalog/                       — catalog image handlers (FBC)
-  internal/                      — shared image test infrastructure
+  internal/ociutil/              — shared manifest discovery and layer extraction
+  internal/testutil/             — shared image test infrastructure
 resolver/                        — bundle resolution from catalogs
 specs/                           — project specs and work items
 ```
