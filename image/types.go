@@ -3,7 +3,6 @@ package image
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -272,16 +271,12 @@ func IsManifest(mediaType string) bool {
 }
 
 // Handler knows how to identify and unpack a specific type of OCI content.
-// Implementations are registered with an [Unpacker] and tried in order during
-// [Unpacker.Unpack].
 type Handler interface {
 	// Name returns a human-readable identifier used in error messages and logs.
 	Name() string
 
 	// Matches inspects the resolved descriptor and manifest to determine
-	// whether this handler can unpack the content. Returning an error does
-	// not stop the [Unpacker] from trying subsequent handlers; the error is
-	// collected and reported if no handler matches.
+	// whether this handler can unpack the content.
 	Matches(ctx context.Context, repo Repository, desc ocispecv1.Descriptor, manifestBytes []byte) (bool, error)
 
 	// Discover walks the image tree and returns the complete set of descriptors
@@ -292,65 +287,7 @@ type Handler interface {
 	// reused by Unpack for free.
 	Discover(ctx context.Context, repo Repository, desc ocispecv1.Descriptor, manifestBytes []byte) ([]ocispecv1.Descriptor, error)
 
-	// Unpack extracts the image content into dest. It is only called after
-	// [Handler.Matches] returns true. Returns an error if unpacking fails
-	// (e.g. blob fetch failure, corrupt layer, I/O error).
+	// Unpack extracts the image content into dest. Returns an error if
+	// unpacking fails (e.g. blob fetch failure, corrupt layer, I/O error).
 	Unpack(ctx context.Context, repo Repository, desc ocispecv1.Descriptor, manifestBytes []byte, dest string) error
-}
-
-// Unpacker resolves an image reference and delegates unpacking to the first
-// registered [Handler] that matches the content.
-type Unpacker struct {
-	handlers []Handler
-}
-
-// NewUnpacker creates an [Unpacker] with the given handlers. Handlers are
-// tried in order during [Unpacker.Unpack], so pass higher-priority handlers first.
-func NewUnpacker(handlers ...Handler) *Unpacker {
-	return &Unpacker{handlers: handlers}
-}
-
-// Unpack resolves the image reference, then tries each registered handler in order
-// until one matches. The first matching handler unpacks the content to dest.
-//
-// Returns an error if resolution fails, if the matching handler's Unpack fails,
-// or if no handler matches. When no handler matches, the error includes any
-// errors returned by individual handlers' Matches calls.
-func (u *Unpacker) Unpack(ctx context.Context, repo Repository, dest string) error {
-	desc, manifestBytes, err := u.resolve(ctx, repo)
-	if err != nil {
-		return err
-	}
-
-	var matchErrors []error
-	for _, handler := range u.handlers {
-		matched, err := handler.Matches(ctx, repo, desc, manifestBytes)
-		if err != nil {
-			matchErrors = append(matchErrors, fmt.Errorf("handler %s: %w", handler.Name(), err))
-			continue
-		}
-		if matched {
-			if err := handler.Unpack(ctx, repo, desc, manifestBytes, dest); err != nil {
-				return fmt.Errorf("handler %s: %w", handler.Name(), err)
-			}
-			return nil
-		}
-	}
-
-	return fmt.Errorf("no handler matched content (mediaType=%s, digest=%s): %w", desc.MediaType, desc.Digest, errors.Join(matchErrors...))
-}
-
-func (u *Unpacker) resolve(ctx context.Context, repo Repository) (ocispecv1.Descriptor, []byte, error) {
-	desc, err := repo.Resolve(ctx)
-	if err != nil {
-		return ocispecv1.Descriptor{}, nil, err
-	}
-
-	manifestBytes, mediaType, err := repo.FetchManifest(ctx, desc)
-	if err != nil {
-		return ocispecv1.Descriptor{}, nil, err
-	}
-	desc.MediaType = mediaType
-
-	return desc, manifestBytes, nil
 }

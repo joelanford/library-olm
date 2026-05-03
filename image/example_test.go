@@ -10,15 +10,14 @@ import (
 
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
-	"github.com/joelanford/library-olm/image"
 	imgbundle "github.com/joelanford/library-olm/image/bundle"
 	imgcatalog "github.com/joelanford/library-olm/image/catalog"
 	"github.com/joelanford/library-olm/image/internal/testutil"
 )
 
-// ExampleUnpacker_registryV1 demonstrates unpacking a registry+v1 operator
-// bundle image using the Unpacker with a RegistryV1Handler.
-func ExampleUnpacker_registryV1() {
+// ExampleRegistryV1Handler demonstrates unpacking a registry+v1 operator
+// bundle image by resolving the image and calling the handler directly.
+func ExampleRegistryV1Handler() {
 	repo := testutil.NewFakeRepo()
 
 	layer, err := testutil.BuildTarLayer(map[string]string{
@@ -30,7 +29,7 @@ func ExampleUnpacker_registryV1() {
 		log.Fatal(err)
 	}
 	layerDesc := repo.AddBlob(layer, ocispecv1.MediaTypeImageLayerGzip)
-	repo.ResolveDesc, _ = testutil.SetupSingleManifest(repo, map[string]string{
+	desc, manifestBytes := testutil.SetupSingleManifest(repo, map[string]string{
 		imgbundle.BundleMediaTypeLabel: imgbundle.BundleMediaTypeRegistryV1,
 	}, ocispecv1.MediaTypeImageManifest, layerDesc)
 
@@ -40,8 +39,8 @@ func ExampleUnpacker_registryV1() {
 	}
 	defer func() { _ = os.RemoveAll(dest) }()
 
-	unpacker := image.NewUnpacker(&imgbundle.RegistryV1Handler{})
-	if err := unpacker.Unpack(context.Background(), repo, dest); err != nil {
+	handler := &imgbundle.RegistryV1Handler{}
+	if err := handler.Unpack(context.Background(), repo, desc, manifestBytes, dest); err != nil {
 		log.Fatal(err)
 	}
 
@@ -52,8 +51,8 @@ func ExampleUnpacker_registryV1() {
 	// metadata/annotations.yaml
 }
 
-// ExampleUnpacker_helmChart demonstrates unpacking a Helm chart OCI artifact.
-func ExampleUnpacker_helmChart() {
+// ExampleHelmChartHandler demonstrates unpacking a Helm chart OCI artifact.
+func ExampleHelmChartHandler() {
 	repo := testutil.NewFakeRepo()
 
 	configDesc := repo.AddBlob(
@@ -63,7 +62,7 @@ func ExampleUnpacker_helmChart() {
 	chartDesc := repo.AddBlob([]byte("fake-tgz-content"), imgbundle.HelmChartContentMediaType)
 
 	manifestBytes := testutil.BuildManifest(configDesc, chartDesc)
-	repo.ResolveDesc = repo.AddManifest(manifestBytes, ocispecv1.MediaTypeImageManifest)
+	desc := repo.AddManifest(manifestBytes, ocispecv1.MediaTypeImageManifest)
 
 	dest, err := os.MkdirTemp("", "example-helm-*")
 	if err != nil {
@@ -71,8 +70,8 @@ func ExampleUnpacker_helmChart() {
 	}
 	defer func() { _ = os.RemoveAll(dest) }()
 
-	unpacker := image.NewUnpacker(&imgbundle.HelmChartHandler{})
-	if err := unpacker.Unpack(context.Background(), repo, dest); err != nil {
+	handler := &imgbundle.HelmChartHandler{}
+	if err := handler.Unpack(context.Background(), repo, desc, manifestBytes, dest); err != nil {
 		log.Fatal(err)
 	}
 
@@ -82,10 +81,10 @@ func ExampleUnpacker_helmChart() {
 	// mychart-0.1.0.tgz
 }
 
-// ExampleUnpacker_fbcCatalog demonstrates unpacking a file-based catalog image.
+// ExampleFBCHandler demonstrates unpacking a file-based catalog image.
 // The FBC handler extracts only the configured catalog directory and rewrites
 // its contents to the root of the destination.
-func ExampleUnpacker_fbcCatalog() {
+func ExampleFBCHandler() {
 	repo := testutil.NewFakeRepo()
 
 	layer, err := testutil.BuildTarLayer(map[string]string{
@@ -97,7 +96,7 @@ func ExampleUnpacker_fbcCatalog() {
 		log.Fatal(err)
 	}
 	layerDesc := repo.AddBlob(layer, ocispecv1.MediaTypeImageLayerGzip)
-	repo.ResolveDesc, _ = testutil.SetupSingleManifest(repo, map[string]string{
+	desc, manifestBytes := testutil.SetupSingleManifest(repo, map[string]string{
 		imgcatalog.ConfigDirLabel: "/configs",
 	}, ocispecv1.MediaTypeImageManifest, layerDesc)
 
@@ -107,8 +106,8 @@ func ExampleUnpacker_fbcCatalog() {
 	}
 	defer func() { _ = os.RemoveAll(dest) }()
 
-	unpacker := image.NewUnpacker(&imgcatalog.FBCHandler{})
-	if err := unpacker.Unpack(context.Background(), repo, dest); err != nil {
+	handler := &imgcatalog.FBCHandler{}
+	if err := handler.Unpack(context.Background(), repo, desc, manifestBytes, dest); err != nil {
 		log.Fatal(err)
 	}
 
