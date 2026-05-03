@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/google/renameio/v2"
+	"github.com/opencontainers/go-digest"
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/manifest"
@@ -33,6 +34,12 @@ func (m *syncMap[K, V]) Load(key K) (V, bool) {
 
 func (m *syncMap[K, V]) Store(key K, value V) {
 	m.m.Store(key, value)
+}
+
+func (m *syncMap[K, V]) Range(f func(K, V) bool) {
+	m.m.Range(func(key, value any) bool {
+		return f(key.(K), value.(V))
+	})
 }
 
 // Repository provides read access to an OCI image repository. Implementations
@@ -78,7 +85,8 @@ type CachingRepository struct {
 	// Concurrency control
 	group      singleflight.Group
 	resolution atomic.Pointer[ocispecv1.Descriptor]
-	manifests  syncMap[string, *cachedManifest] // digest → manifest
+	manifests  syncMap[string, *cachedManifest]      // digest → manifest
+	blobDescs  syncMap[string, ocispecv1.Descriptor] // digest → descriptor
 }
 
 // NewCachingRepository wraps client with a local cache. It creates a temporary
@@ -106,6 +114,26 @@ func (s *CachingRepository) Close() error {
 
 func (s *CachingRepository) blobsDir() string {
 	return filepath.Join(s.cacheDir, "blobs")
+}
+
+// CachedDescriptors returns descriptors for all content currently in the cache,
+// including both manifests and blobs. The returned slice is a snapshot; subsequent
+// fetches will not be reflected.
+func (s *CachingRepository) CachedDescriptors() []ocispecv1.Descriptor {
+	var descs []ocispecv1.Descriptor
+	s.manifests.Range(func(digestStr string, m *cachedManifest) bool {
+		descs = append(descs, ocispecv1.Descriptor{
+			MediaType: m.mediaType,
+			Digest:    digest.Digest(digestStr),
+			Size:      int64(len(m.bytes)),
+		})
+		return true
+	})
+	s.blobDescs.Range(func(_ string, desc ocispecv1.Descriptor) bool {
+		descs = append(descs, desc)
+		return true
+	})
+	return descs
 }
 
 func (s *CachingRepository) Resolve(ctx context.Context) (ocispecv1.Descriptor, error) {
@@ -182,6 +210,7 @@ func (s *CachingRepository) FetchBlob(ctx context.Context, desc ocispecv1.Descri
 	blobPath := filepath.Join(s.blobsDir(), desc.Digest.String())
 
 	if f, err := os.Open(blobPath); err == nil {
+		s.blobDescs.Store(desc.Digest.String(), desc)
 		return f, nil
 	}
 
@@ -199,6 +228,7 @@ func (s *CachingRepository) FetchBlob(ctx context.Context, desc ocispecv1.Descri
 // fetches from the inner repo on miss.
 func (s *CachingRepository) fetchAndCacheBlob(ctx context.Context, desc ocispecv1.Descriptor, blobPath string) error {
 	if _, err := os.Stat(blobPath); err == nil {
+		s.blobDescs.Store(desc.Digest.String(), desc)
 		return nil
 	}
 
@@ -208,6 +238,9 @@ func (s *CachingRepository) fetchAndCacheBlob(ctx context.Context, desc ocispecv
 	}
 
 	_, cacheErr := s.cacheFile(blobPath, reader)
+	if cacheErr == nil {
+		s.blobDescs.Store(desc.Digest.String(), desc)
+	}
 	return errors.Join(cacheErr, reader.Close())
 }
 
@@ -250,6 +283,14 @@ type Handler interface {
 	// not stop the [Unpacker] from trying subsequent handlers; the error is
 	// collected and reported if no handler matches.
 	Matches(ctx context.Context, repo Repository, desc ocispecv1.Descriptor, manifestBytes []byte) (bool, error)
+
+	// Discover walks the image tree and returns the complete set of descriptors
+	// that [Handler.Unpack] would need to process. It fetches the minimum
+	// necessary to discover the full graph (manifests and configs, not layer
+	// blobs) and does not write anything to disk. When used with a
+	// [CachingRepository], everything fetched during Discover is cached and
+	// reused by Unpack for free.
+	Discover(ctx context.Context, repo Repository, desc ocispecv1.Descriptor, manifestBytes []byte) ([]ocispecv1.Descriptor, error)
 
 	// Unpack extracts the image content into dest. It is only called after
 	// [Handler.Matches] returns true. Returns an error if unpacking fails

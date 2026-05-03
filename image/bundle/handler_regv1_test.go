@@ -125,6 +125,44 @@ func TestRegistryV1Handler_Matches(t *testing.T) {
 	})
 }
 
+func TestRegistryV1Handler_Discover(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ReturnsAllDescriptors", func(t *testing.T) {
+		repo := testutil.NewFakeRepo()
+
+		configBlob := testutil.BuildImageConfig(map[string]string{
+			BundleMediaTypeLabel: BundleMediaTypeRegistryV1,
+		})
+		configDesc := repo.AddBlob(configBlob, ocispecv1.MediaTypeImageConfig)
+
+		layerDesc := ocispecv1.Descriptor{
+			MediaType: ocispecv1.MediaTypeImageLayerGzip,
+			Digest:    digest.FromString("layer-data"),
+			Size:      100,
+		}
+
+		manifestBytes := testutil.BuildManifest(configDesc, layerDesc)
+		desc := repo.AddManifest(manifestBytes, ocispecv1.MediaTypeImageManifest)
+
+		h := &RegistryV1Handler{}
+		descs, err := h.Discover(ctx, repo, desc, manifestBytes)
+		require.NoError(t, err)
+
+		require.Len(t, descs, 3)
+		assert.Equal(t, desc.Digest, descs[0].Digest)
+		assert.Equal(t, configDesc.Digest, descs[1].Digest)
+		assert.Equal(t, layerDesc.Digest, descs[2].Digest)
+	})
+
+	t.Run("InvalidManifest", func(t *testing.T) {
+		h := &RegistryV1Handler{}
+		desc := ocispecv1.Descriptor{MediaType: ocispecv1.MediaTypeImageManifest}
+		_, err := h.Discover(ctx, testutil.NewFakeRepo(), desc, []byte("not-json"))
+		require.Error(t, err)
+	})
+}
+
 func TestRegistryV1Handler_Unpack(t *testing.T) {
 	ctx := context.Background()
 

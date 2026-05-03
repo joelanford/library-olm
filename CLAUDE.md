@@ -14,6 +14,7 @@ catalog/             — catalog API, formats, querying, and indexing
 image/               — OCI registry access and content unpacking
   bundle/            — bundle image handlers (registry+v1, Helm)
   catalog/           — catalog image handlers (FBC)
+  internal/ociutil/  — shared manifest discovery and layer extraction utilities
 resolver/            — bundle resolution from catalogs
 ```
 

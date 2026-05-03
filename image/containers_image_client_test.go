@@ -77,7 +77,7 @@ func (f *fakeImageSource) LayerInfosForCopy(_ context.Context, _ *digest.Digest)
 	return nil, nil
 }
 
-// fakeImageReference implements types.ImageReference for testing NewContainersImageClient.
+// fakeImageReference implements types.ImageReference for testing NewContainersImageRepository.
 type fakeImageReference struct {
 	ref       reference.Named
 	imgSrc    types.ImageSource
@@ -103,7 +103,7 @@ func (f *fakeImageReference) NewImageDestination(_ context.Context, _ *types.Sys
 	return nil, fmt.Errorf("not implemented")
 }
 
-func TestNewContainersImageClient(t *testing.T) {
+func TestNewContainersImageRepository(t *testing.T) {
 	ctx := context.Background()
 	ref, _ := reference.ParseNormalizedNamed("example.com/test:latest")
 
@@ -111,21 +111,21 @@ func TestNewContainersImageClient(t *testing.T) {
 		src := newFakeImageSource()
 		imgRef := &fakeImageReference{ref: ref, imgSrc: src}
 
-		client, err := NewContainersImageClient(ctx, imgRef, nil)
+		repo, err := NewContainersImageRepository(ctx, imgRef, nil)
 		require.NoError(t, err)
-		assert.Equal(t, ref.String(), client.Named().String())
+		assert.Equal(t, ref.String(), repo.Named().String())
 	})
 
 	t.Run("ImageSourceError", func(t *testing.T) {
 		imgRef := &fakeImageReference{ref: ref, srcErr: fmt.Errorf("source error")}
 
-		_, err := NewContainersImageClient(ctx, imgRef, nil)
+		_, err := NewContainersImageRepository(ctx, imgRef, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "source error")
 	})
 }
 
-func TestContainersImageClient_Resolve(t *testing.T) {
+func TestContainersImageRepository_Resolve(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
@@ -135,7 +135,7 @@ func TestContainersImageClient_Resolve(t *testing.T) {
 		})
 		src.setPrimaryManifest(manifestData, ocispecv1.MediaTypeImageManifest)
 
-		client := &ContainersImageClient{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src}
 
 		desc, err := client.Resolve(ctx)
 		require.NoError(t, err)
@@ -146,7 +146,7 @@ func TestContainersImageClient_Resolve(t *testing.T) {
 
 	t.Run("GetManifestError", func(t *testing.T) {
 		src := newFakeImageSource()
-		client := &ContainersImageClient{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src}
 
 		_, err := client.Resolve(ctx)
 		require.Error(t, err)
@@ -161,14 +161,14 @@ func TestContainersImageClient_Resolve(t *testing.T) {
 			ocispecv1.MediaTypeImageManifest,
 		)
 
-		client := &ContainersImageClient{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src}
 
 		_, err := client.Resolve(ctx)
 		require.Error(t, err)
 	})
 }
 
-func TestContainersImageClient_FetchManifest(t *testing.T) {
+func TestContainersImageRepository_FetchManifest(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
@@ -179,7 +179,7 @@ func TestContainersImageClient_FetchManifest(t *testing.T) {
 		dgst := digest.FromBytes(manifestData)
 		src.setManifest(dgst, manifestData, ocispecv1.MediaTypeImageManifest)
 
-		client := &ContainersImageClient{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src}
 
 		got, mediaType, err := client.FetchManifest(ctx, ocispecv1.Descriptor{Digest: dgst})
 		require.NoError(t, err)
@@ -189,14 +189,14 @@ func TestContainersImageClient_FetchManifest(t *testing.T) {
 
 	t.Run("NotFound", func(t *testing.T) {
 		src := newFakeImageSource()
-		client := &ContainersImageClient{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src}
 
 		_, _, err := client.FetchManifest(ctx, ocispecv1.Descriptor{Digest: digest.FromString("missing")})
 		require.Error(t, err)
 	})
 }
 
-func TestContainersImageClient_FetchBlob(t *testing.T) {
+func TestContainersImageRepository_FetchBlob(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success", func(t *testing.T) {
@@ -205,7 +205,7 @@ func TestContainersImageClient_FetchBlob(t *testing.T) {
 		dgst := digest.FromBytes(blobData)
 		src.blobs[dgst.String()] = blobData
 
-		client := &ContainersImageClient{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src}
 
 		desc := ocispecv1.Descriptor{Digest: dgst, Size: int64(len(blobData))}
 		reader, err := client.FetchBlob(ctx, desc)
@@ -219,7 +219,7 @@ func TestContainersImageClient_FetchBlob(t *testing.T) {
 
 	t.Run("NotFound", func(t *testing.T) {
 		src := newFakeImageSource()
-		client := &ContainersImageClient{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src}
 
 		_, err := client.FetchBlob(ctx, ocispecv1.Descriptor{Digest: digest.FromString("missing")})
 		require.Error(t, err)
@@ -232,7 +232,7 @@ func TestContainersImageClient_FetchBlob(t *testing.T) {
 		dgst := digest.FromBytes(blobData)
 		src.blobs[dgst.String()] = blobData
 
-		client := &ContainersImageClient{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src}
 
 		// Descriptor claims more bytes than actually available — VerifyReader
 		// detects the premature EOF via its size check.
@@ -245,10 +245,10 @@ func TestContainersImageClient_FetchBlob(t *testing.T) {
 	})
 }
 
-func TestContainersImageClient_Close(t *testing.T) {
+func TestContainersImageRepository_Close(t *testing.T) {
 	t.Run("DelegatesToImageSource", func(t *testing.T) {
 		src := newFakeImageSource()
-		client := &ContainersImageClient{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src}
 
 		require.NoError(t, client.Close())
 		assert.True(t, src.closed)
@@ -257,7 +257,7 @@ func TestContainersImageClient_Close(t *testing.T) {
 	t.Run("PropagatesError", func(t *testing.T) {
 		src := newFakeImageSource()
 		src.closeErr = fmt.Errorf("close failed")
-		client := &ContainersImageClient{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src}
 
 		err := client.Close()
 		require.Error(t, err)

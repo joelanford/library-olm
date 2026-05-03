@@ -109,6 +109,51 @@ func TestHelmChartHandler_Matches(t *testing.T) {
 	})
 }
 
+func TestHelmChartHandler_Discover(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ReturnsAllDescriptors", func(t *testing.T) {
+		repo := testutil.NewFakeRepo()
+		configDesc := repo.AddBlob([]byte(`{"name":"mychart","version":"0.1.0"}`), HelmConfigMediaType)
+		chartLayerDesc := repo.AddBlob([]byte("chart-data"), HelmChartContentMediaType)
+
+		manifestBytes := testutil.BuildManifest(configDesc, chartLayerDesc)
+		desc := repo.AddManifest(manifestBytes, ocispecv1.MediaTypeImageManifest)
+
+		h := &HelmChartHandler{}
+		descs, err := h.Discover(ctx, repo, desc, manifestBytes)
+		require.NoError(t, err)
+
+		require.Len(t, descs, 3)
+		assert.Equal(t, desc.Digest, descs[0].Digest)
+		assert.Equal(t, configDesc.Digest, descs[1].Digest)
+		assert.Equal(t, chartLayerDesc.Digest, descs[2].Digest)
+	})
+
+	t.Run("IncludesProvenanceLayer", func(t *testing.T) {
+		repo := testutil.NewFakeRepo()
+		configDesc := repo.AddBlob([]byte(`{"name":"mychart","version":"0.1.0"}`), HelmConfigMediaType)
+		chartLayerDesc := repo.AddBlob([]byte("chart-data"), HelmChartContentMediaType)
+		provDesc := repo.AddBlob([]byte("prov-data"), HelmProvenanceMediaType)
+
+		manifestBytes := testutil.BuildManifest(configDesc, chartLayerDesc, provDesc)
+		desc := repo.AddManifest(manifestBytes, ocispecv1.MediaTypeImageManifest)
+
+		h := &HelmChartHandler{}
+		descs, err := h.Discover(ctx, repo, desc, manifestBytes)
+		require.NoError(t, err)
+
+		require.Len(t, descs, 4)
+	})
+
+	t.Run("InvalidManifest", func(t *testing.T) {
+		h := &HelmChartHandler{}
+		desc := ocispecv1.Descriptor{MediaType: ocispecv1.MediaTypeImageManifest}
+		_, err := h.Discover(ctx, testutil.NewFakeRepo(), desc, []byte("not-json"))
+		require.Error(t, err)
+	})
+}
+
 func TestHelmChartHandler_Unpack(t *testing.T) {
 	ctx := context.Background()
 

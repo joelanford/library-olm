@@ -12,39 +12,39 @@ import (
 	"oras.land/oras-go/v2/content"
 )
 
-var _ Repository = (*ContainersImageClient)(nil)
+var _ Repository = (*ContainersImageRepository)(nil)
 
-// ContainersImageClient implements [Repository] using the containers/image library.
+// ContainersImageRepository implements [Repository] using the containers/image library.
 // It wraps a [types.ImageSource] and verifies blob content against the requested
 // descriptor using size-checked readers.
-type ContainersImageClient struct {
+type ContainersImageRepository struct {
 	ref         reference.Named
 	imageSource types.ImageSource
 }
 
-// NewContainersImageClient creates a [Repository] backed by a [types.ImageReference].
+// NewContainersImageRepository creates a [Repository] backed by a [types.ImageReference].
 // The reference can use any transport supported by the containers/image library
 // (docker, oci-layout, oci-archive, etc.). The caller must call Close on the
-// returned client to release the underlying image source.
+// returned repository to release the underlying image source.
 //
 // Returns an error if the image source cannot be created (e.g. authentication
 // failure, network error, invalid reference).
-func NewContainersImageClient(ctx context.Context, imgRef types.ImageReference, srcCtx *types.SystemContext) (*ContainersImageClient, error) {
+func NewContainersImageRepository(ctx context.Context, imgRef types.ImageReference, srcCtx *types.SystemContext) (*ContainersImageRepository, error) {
 	imgSrc, err := imgRef.NewImageSource(ctx, srcCtx)
 	if err != nil {
 		return nil, err
 	}
-	return &ContainersImageClient{
+	return &ContainersImageRepository{
 		ref:         imgRef.DockerReference(),
 		imageSource: imgSrc,
 	}, nil
 }
 
-func (c *ContainersImageClient) Named() reference.Named {
+func (c *ContainersImageRepository) Named() reference.Named {
 	return c.ref
 }
 
-func (c *ContainersImageClient) Resolve(ctx context.Context) (ocispecv1.Descriptor, error) {
+func (c *ContainersImageRepository) Resolve(ctx context.Context) (ocispecv1.Descriptor, error) {
 	manifestBytes, mediaType, err := c.imageSource.GetManifest(ctx, nil)
 	if err != nil {
 		return ocispecv1.Descriptor{}, err
@@ -62,15 +62,15 @@ func (c *ContainersImageClient) Resolve(ctx context.Context) (ocispecv1.Descript
 	}, nil
 }
 
-func (c *ContainersImageClient) Close() error {
+func (c *ContainersImageRepository) Close() error {
 	return c.imageSource.Close()
 }
 
-func (c *ContainersImageClient) FetchManifest(ctx context.Context, desc ocispecv1.Descriptor) ([]byte, string, error) {
+func (c *ContainersImageRepository) FetchManifest(ctx context.Context, desc ocispecv1.Descriptor) ([]byte, string, error) {
 	return c.imageSource.GetManifest(ctx, &desc.Digest)
 }
 
-func (c *ContainersImageClient) FetchBlob(ctx context.Context, desc ocispecv1.Descriptor) (io.ReadCloser, error) {
+func (c *ContainersImageRepository) FetchBlob(ctx context.Context, desc ocispecv1.Descriptor) (io.ReadCloser, error) {
 	blobInfo := types.BlobInfo{Digest: desc.Digest, Size: desc.Size}
 	reader, _, err := c.imageSource.GetBlob(ctx, blobInfo, none.NoCache)
 	if err != nil {

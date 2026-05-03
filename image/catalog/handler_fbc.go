@@ -10,6 +10,7 @@ import (
 	"go.podman.io/image/v5/types"
 
 	"github.com/joelanford/library-olm/image"
+	"github.com/joelanford/library-olm/image/internal/ociutil"
 )
 
 // ConfigDirLabel is the label on catalog images that specifies the directory
@@ -50,6 +51,19 @@ func (h *FBCHandler) Matches(ctx context.Context, repo image.Repository, desc oc
 	return ok, nil
 }
 
+func (h *FBCHandler) Discover(ctx context.Context, repo image.Repository, desc ocispecv1.Descriptor, manifestBytes []byte) ([]ocispecv1.Descriptor, error) {
+	if image.IsIndex(desc.MediaType) {
+		platformDesc, platformManifestBytes, err := resolvePlatformManifest(ctx, repo, manifestBytes, desc.MediaType)
+		if err != nil {
+			return nil, fmt.Errorf("resolving platform manifest: %w", err)
+		}
+		desc = platformDesc
+		manifestBytes = platformManifestBytes
+	}
+
+	return ociutil.DiscoverManifestDescriptors(ctx, repo, desc, manifestBytes)
+}
+
 func (h *FBCHandler) Unpack(ctx context.Context, repo image.Repository, desc ocispecv1.Descriptor, manifestBytes []byte, dest string) error {
 	// If this is a manifest list/index, resolve to the platform-specific manifest first
 	if image.IsIndex(desc.MediaType) {
@@ -68,14 +82,12 @@ func (h *FBCHandler) Unpack(ctx context.Context, repo image.Repository, desc oci
 
 	configDir := cfg.Config.Labels[ConfigDirLabel]
 
-	unpacker := &image.ManifestUnpacker{
-		Filter: image.CombineFilters(
-			image.OnlyPaths(configDir),
-			image.RewritePath(configDir, "/"),
-			image.AsCurrentUser(),
-		),
-	}
-	return unpacker.Unpack(ctx, repo, manifestBytes, dest)
+	filter := ociutil.CombineFilters(
+		ociutil.OnlyPaths(configDir),
+		ociutil.RewritePath(configDir, "/"),
+		ociutil.AsCurrentUser(),
+	)
+	return ociutil.ApplyLayers(ctx, repo, manifestBytes, dest, filter)
 }
 
 // resolvePlatformManifest selects the appropriate platform manifest from a manifest list/index.

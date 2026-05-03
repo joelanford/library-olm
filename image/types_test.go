@@ -74,6 +74,10 @@ func (h *configurableHandler) Matches(ctx context.Context, repo Repository, desc
 	return h.matchFunc(ctx, repo, desc, manifestBytes)
 }
 
+func (h *configurableHandler) Discover(_ context.Context, _ Repository, _ ocispecv1.Descriptor, _ []byte) ([]ocispecv1.Descriptor, error) {
+	return nil, nil
+}
+
 func (h *configurableHandler) Unpack(_ context.Context, _ Repository, _ ocispecv1.Descriptor, _ []byte, _ string) error {
 	h.unpacked = true
 	return h.unpackErr
@@ -733,5 +737,95 @@ func TestCachingRepository_Close(t *testing.T) {
 		err = repo.Close()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "close failed")
+	})
+}
+
+func TestCachingRepository_CachedDescriptors(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("EmptyCache", func(t *testing.T) {
+		inner := testutil.NewFakeRepo()
+		repo, err := NewCachingRepository(inner)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = repo.Close() })
+
+		descs := repo.CachedDescriptors()
+		assert.Empty(t, descs)
+	})
+
+	t.Run("IncludesFetchedManifests", func(t *testing.T) {
+		inner := testutil.NewFakeRepo()
+		manifestData := testutil.MustJSON(ocispecv1.Manifest{
+			MediaType: ocispecv1.MediaTypeImageManifest,
+		})
+		desc := inner.AddManifest(manifestData, ocispecv1.MediaTypeImageManifest)
+
+		repo, err := NewCachingRepository(inner)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = repo.Close() })
+
+		_, _, err = repo.FetchManifest(ctx, desc)
+		require.NoError(t, err)
+
+		cached := repo.CachedDescriptors()
+		require.Len(t, cached, 1)
+		assert.Equal(t, desc.Digest, cached[0].Digest)
+		assert.Equal(t, ocispecv1.MediaTypeImageManifest, cached[0].MediaType)
+		assert.Equal(t, int64(len(manifestData)), cached[0].Size)
+	})
+
+	t.Run("IncludesFetchedBlobs", func(t *testing.T) {
+		inner := testutil.NewFakeRepo()
+		blobData := []byte("cached blob")
+		desc := inner.AddBlob(blobData, ocispecv1.MediaTypeImageLayerGzip)
+
+		repo, err := NewCachingRepository(inner)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = repo.Close() })
+
+		reader, err := repo.FetchBlob(ctx, desc)
+		require.NoError(t, err)
+		_, _ = io.ReadAll(reader)
+		_ = reader.Close()
+
+		cached := repo.CachedDescriptors()
+		require.Len(t, cached, 1)
+		assert.Equal(t, desc.Digest, cached[0].Digest)
+		assert.Equal(t, desc.Size, cached[0].Size)
+		assert.Equal(t, ocispecv1.MediaTypeImageLayerGzip, cached[0].MediaType)
+	})
+
+	t.Run("IncludesBothManifestsAndBlobs", func(t *testing.T) {
+		inner := testutil.NewFakeRepo()
+
+		manifestData := testutil.MustJSON(ocispecv1.Manifest{
+			MediaType: ocispecv1.MediaTypeImageManifest,
+		})
+		manifestDesc := inner.AddManifest(manifestData, ocispecv1.MediaTypeImageManifest)
+
+		blobData := []byte("blob content")
+		blobDesc := inner.AddBlob(blobData, ocispecv1.MediaTypeImageLayerGzip)
+
+		repo, err := NewCachingRepository(inner)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = repo.Close() })
+
+		_, _, err = repo.FetchManifest(ctx, manifestDesc)
+		require.NoError(t, err)
+
+		reader, err := repo.FetchBlob(ctx, blobDesc)
+		require.NoError(t, err)
+		_, _ = io.ReadAll(reader)
+		_ = reader.Close()
+
+		cached := repo.CachedDescriptors()
+		assert.Len(t, cached, 2)
+
+		digests := make(map[string]bool)
+		for _, d := range cached {
+			digests[d.Digest.String()] = true
+		}
+		assert.True(t, digests[manifestDesc.Digest.String()])
+		assert.True(t, digests[blobDesc.Digest.String()])
 	})
 }

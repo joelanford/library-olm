@@ -310,7 +310,7 @@ func unpackImage(ctx context.Context, uri string, handler image.Handler, dest st
 		return fmt.Errorf("parse reference %q: %w", uri, err)
 	}
 
-	client, err := image.NewContainersImageClient(ctx, imgRef, &types.SystemContext{})
+	client, err := image.NewContainersImageRepository(ctx, imgRef, &types.SystemContext{})
 	if err != nil {
 		return fmt.Errorf("create client: %w", err)
 	}

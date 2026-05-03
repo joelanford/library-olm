@@ -438,6 +438,81 @@ func TestFBCHandler_Unpack(t *testing.T) {
 	})
 }
 
+func TestFBCHandler_Discover(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("SingleManifest", func(t *testing.T) {
+		repo := testutil.NewFakeRepo()
+
+		configBlob := testutil.BuildImageConfig(map[string]string{
+			ConfigDirLabel: "/configs",
+		})
+		configDesc := repo.AddBlob(configBlob, ocispecv1.MediaTypeImageConfig)
+
+		layerDesc := ocispecv1.Descriptor{
+			MediaType: ocispecv1.MediaTypeImageLayerGzip,
+			Digest:    digest.FromString("layer-content"),
+			Size:      100,
+		}
+
+		manifestBytes := testutil.BuildManifest(configDesc, layerDesc)
+		desc := repo.AddManifest(manifestBytes, ocispecv1.MediaTypeImageManifest)
+
+		h := &FBCHandler{}
+		descs, err := h.Discover(ctx, repo, desc, manifestBytes)
+		require.NoError(t, err)
+
+		assert.Len(t, descs, 3)
+		assert.Equal(t, desc.Digest, descs[0].Digest)
+		assert.Equal(t, configDesc.Digest, descs[1].Digest)
+		assert.Equal(t, layerDesc.Digest, descs[2].Digest)
+	})
+
+	t.Run("IndexResolvesToPlatform", func(t *testing.T) {
+		repo := testutil.NewFakeRepo()
+
+		configBlob := testutil.BuildImageConfig(map[string]string{
+			ConfigDirLabel: "/configs",
+		})
+		configDesc := repo.AddBlob(configBlob, ocispecv1.MediaTypeImageConfig)
+
+		layerDesc := ocispecv1.Descriptor{
+			MediaType: ocispecv1.MediaTypeImageLayerGzip,
+			Digest:    digest.FromString("layer"),
+			Size:      50,
+		}
+
+		manifestBytes := testutil.BuildManifest(configDesc, layerDesc)
+		platformDesc := repo.AddManifest(manifestBytes, ocispecv1.MediaTypeImageManifest)
+
+		indexBytes := buildOCIIndex(manifestListEntry{
+			desc: platformDesc,
+			arch: runtime.GOARCH,
+			os:   "linux",
+		})
+		indexDesc := ocispecv1.Descriptor{
+			MediaType: ocispecv1.MediaTypeImageIndex,
+			Digest:    digest.FromBytes(indexBytes),
+			Size:      int64(len(indexBytes)),
+		}
+
+		h := &FBCHandler{}
+		descs, err := h.Discover(ctx, repo, indexDesc, indexBytes)
+		require.NoError(t, err)
+
+		assert.Len(t, descs, 3)
+		assert.Equal(t, platformDesc.Digest, descs[0].Digest)
+	})
+
+	t.Run("IndexResolutionFails", func(t *testing.T) {
+		h := &FBCHandler{}
+		indexDesc := ocispecv1.Descriptor{MediaType: ocispecv1.MediaTypeImageIndex}
+		_, err := h.Discover(ctx, testutil.NewFakeRepo(), indexDesc, []byte("not-json"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "resolving platform manifest")
+	})
+}
+
 func TestResolvePlatformManifest(t *testing.T) {
 	ctx := context.Background()
 

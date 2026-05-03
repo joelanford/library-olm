@@ -7,6 +7,7 @@ import (
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/joelanford/library-olm/image"
+	"github.com/joelanford/library-olm/image/internal/ociutil"
 )
 
 // Bundle label keys used to identify and configure registry+v1 bundles.
@@ -49,6 +50,10 @@ func (h *RegistryV1Handler) Matches(ctx context.Context, repo image.Repository, 
 	return ok && mediaType == BundleMediaTypeRegistryV1, nil
 }
 
+func (h *RegistryV1Handler) Discover(ctx context.Context, repo image.Repository, desc ocispecv1.Descriptor, manifestBytes []byte) ([]ocispecv1.Descriptor, error) {
+	return ociutil.DiscoverManifestDescriptors(ctx, repo, desc, manifestBytes)
+}
+
 func (h *RegistryV1Handler) Unpack(ctx context.Context, repo image.Repository, _ ocispecv1.Descriptor, manifestBytes []byte, dest string) error {
 	cfg, err := image.FetchImageConfig(ctx, repo, manifestBytes)
 	if err != nil {
@@ -64,13 +69,9 @@ func (h *RegistryV1Handler) Unpack(ctx context.Context, repo image.Repository, _
 		metadataDir = v
 	}
 
-	filters := []image.LayerFilter{
-		image.OnlyPaths(manifestsDir, metadataDir),
-		image.AsCurrentUser(),
-	}
-
-	unpacker := &image.ManifestUnpacker{
-		Filter: image.CombineFilters(filters...),
-	}
-	return unpacker.Unpack(ctx, repo, manifestBytes, dest)
+	filter := ociutil.CombineFilters(
+		ociutil.OnlyPaths(manifestsDir, metadataDir),
+		ociutil.AsCurrentUser(),
+	)
+	return ociutil.ApplyLayers(ctx, repo, manifestBytes, dest, filter)
 }

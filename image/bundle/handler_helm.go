@@ -13,6 +13,7 @@ import (
 	"helm.sh/helm/v4/pkg/downloader"
 
 	"github.com/joelanford/library-olm/image"
+	"github.com/joelanford/library-olm/image/internal/ociutil"
 )
 
 // Helm OCI artifact media types as defined by the Helm specification.
@@ -72,6 +73,10 @@ func (h *HelmChartHandler) Matches(_ context.Context, _ image.Repository, desc o
 	}
 
 	return m.Config.MediaType == HelmConfigMediaType, nil
+}
+
+func (h *HelmChartHandler) Discover(ctx context.Context, repo image.Repository, desc ocispecv1.Descriptor, manifestBytes []byte) ([]ocispecv1.Descriptor, error) {
+	return ociutil.DiscoverManifestDescriptors(ctx, repo, desc, manifestBytes)
 }
 
 func (h *HelmChartHandler) Unpack(ctx context.Context, repo image.Repository, _ ocispecv1.Descriptor, manifestBytes []byte, dest string) error {
