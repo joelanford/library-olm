@@ -9,6 +9,7 @@ import (
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle/source"
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/config"
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/certproviders"
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render/registryv1"
 )
 
@@ -20,6 +21,14 @@ type Config = config.Config
 
 // CertificateProvider handles certificate provisioning for webhook resources.
 type CertificateProvider = render.CertificateProvider
+
+// CertManagerCertificateProvider is a CertificateProvider that uses cert-manager to provision
+// TLS certificates for webhook services.
+type CertManagerCertificateProvider = certproviders.CertManagerCertificateProvider
+
+// OpenshiftServiceCACertificateProvider is a CertificateProvider that uses the OpenShift
+// service CA operator to provision TLS certificates for webhook services.
+type OpenshiftServiceCACertificateProvider = certproviders.OpenshiftServiceCaCertificateProvider
 
 // DeploymentConfig contains optional customizations to apply to CSV deployments.
 type DeploymentConfig = config.DeploymentConfig
@@ -53,4 +62,5 @@ var (
 
 	// WithDeploymentConfig sets deployment customizations to apply to CSV deployments.
 	WithDeploymentConfig = render.WithDeploymentConfig
+
 )
