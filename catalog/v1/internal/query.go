@@ -109,8 +109,8 @@ func (g *CompositeUpdateGraphQuery) ListBundles(ctx context.Context) iter.Seq2[b
 	return queryBundlesDescendant(ctx, g.DB, g.GraphID)
 }
 
-func (g *CompositeUpdateGraphQuery) Successors(ctx context.Context, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error] {
-	return querySuccessorsDescendant(ctx, g.DB, g.GraphID, from)
+func (g *CompositeUpdateGraphQuery) Successors(ctx context.Context, fromID bundlev1.BundleID, fromVersion bsemver.Version) iter.Seq2[bundlev1.Bundle, error] {
+	return querySuccessorsDescendant(ctx, g.DB, g.GraphID, fromID, fromVersion)
 }
 
 // ListGraphs returns an iterator over the child update graphs.
@@ -171,8 +171,8 @@ func (g *UpdateGraphQuery) ListBundles(ctx context.Context) iter.Seq2[bundlev1.B
 	return queryBundlesDirect(ctx, g.DB, g.GraphID)
 }
 
-func (g *UpdateGraphQuery) Successors(ctx context.Context, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error] {
-	return querySuccessorsDirect(ctx, g.DB, g.GraphID, from)
+func (g *UpdateGraphQuery) Successors(ctx context.Context, fromID bundlev1.BundleID, fromVersion bsemver.Version) iter.Seq2[bundlev1.Bundle, error] {
+	return querySuccessorsDirect(ctx, g.DB, g.GraphID, fromID, fromVersion)
 }
 
 func queryBundlesDirect(ctx context.Context, db *sql.DB, graphID int64) iter.Seq2[bundlev1.Bundle, error] {
@@ -214,43 +214,155 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, graphID int64) iter
 	}
 }
 
-func querySuccessorsDirect(ctx context.Context, db *sql.DB, graphID int64, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error] {
+func querySuccessorsDirect(ctx context.Context, db *sql.DB, graphID int64, fromID bundlev1.BundleID, fromVersion bsemver.Version) iter.Seq2[bundlev1.Bundle, error] {
+	return querySuccessorsCollected(ctx, db,
+		`SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri
+		 FROM content_successors s
+		 JOIN content_bundles b ON b.id = s.to_bundle_id
+		 WHERE s.graph_id = ? AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE bundle_id = ?)`,
+		[]any{graphID, string(fromID)},
+		`SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, pc.version_range
+		 FROM content_predecessor_ranges pc
+		 JOIN content_bundles b ON b.id = pc.bundle_id
+		 WHERE pc.graph_id = ?`,
+		[]any{graphID},
+		fromVersion,
+	)
+}
+
+func querySuccessorsDescendant(ctx context.Context, db *sql.DB, graphID int64, fromID bundlev1.BundleID, fromVersion bsemver.Version) iter.Seq2[bundlev1.Bundle, error] {
+	const descendantCTE = `WITH RECURSIVE descendants(id) AS (
+		SELECT id FROM content_graphs WHERE parent_id = ?
+		UNION ALL
+		SELECT g.id FROM content_graphs g JOIN descendants d ON g.parent_id = d.id
+	)`
+	return querySuccessorsCollected(ctx, db,
+		descendantCTE+`
+		SELECT DISTINCT b.bundle_id, b.package_name, b.version, b.release, b.uri
+		FROM content_successors s
+		JOIN content_bundles b ON b.id = s.to_bundle_id
+		WHERE s.graph_id IN (SELECT id FROM descendants)
+		  AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE bundle_id = ?)`,
+		[]any{graphID, string(fromID)},
+		descendantCTE+`
+		SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, pc.version_range
+		FROM content_predecessor_ranges pc
+		JOIN content_bundles b ON b.id = pc.bundle_id
+		WHERE pc.graph_id IN (SELECT id FROM descendants)`,
+		[]any{graphID},
+		fromVersion,
+	)
+}
+
+func querySuccessorsCollected(
+	ctx context.Context, db *sql.DB,
+	explicitSQL string, explicitArgs []any,
+	rangeSQL string, rangeArgs []any,
+	version bsemver.Version,
+) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
-		rows, err := db.QueryContext(ctx, `
-			SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri
-			FROM content_successors s
-			JOIN content_bundles b ON b.id = s.to_bundle_id
-			WHERE s.graph_id = ? AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE bundle_id = ?)
-			ORDER BY b.bundle_id`, graphID, string(from))
-		if err != nil {
-			yield(nil, err)
+		seen, ok := yieldExplicitSuccessors(ctx, db, explicitSQL, explicitArgs, yield)
+		if !ok {
 			return
 		}
-		defer func() { _ = rows.Close() }()
-		yieldBundleRows(rows, yield)
+		yieldRangeSuccessors(ctx, db, rangeSQL, rangeArgs, version, seen, yield)
 	}
 }
 
-func querySuccessorsDescendant(ctx context.Context, db *sql.DB, graphID int64, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error] {
-	return func(yield func(bundlev1.Bundle, error) bool) {
-		rows, err := db.QueryContext(ctx, `
-			WITH RECURSIVE descendants(id) AS (
-				SELECT id FROM content_graphs WHERE parent_id = ?
-				UNION ALL
-				SELECT g.id FROM content_graphs g JOIN descendants d ON g.parent_id = d.id
-			)
-			SELECT DISTINCT b.bundle_id, b.package_name, b.version, b.release, b.uri
-			FROM content_successors s
-			JOIN content_bundles b ON b.id = s.to_bundle_id
-			WHERE s.graph_id IN (SELECT id FROM descendants) AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE bundle_id = ?)
-			ORDER BY b.bundle_id`, graphID, string(from))
+func yieldExplicitSuccessors(ctx context.Context, db *sql.DB, query string, args []any, yield func(bundlev1.Bundle, error) bool) (map[string]bool, bool) {
+	seen := make(map[string]bool)
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return seen, yield(nil, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id, packageName, versionStr, releaseStr, uri string
+		if err := rows.Scan(&id, &packageName, &versionStr, &releaseStr, &uri); err != nil {
+			if !yield(nil, err) {
+				return seen, false
+			}
+			continue
+		}
+		seen[id] = true
+		b, err := parseBundleRow(id, packageName, versionStr, releaseStr, uri)
 		if err != nil {
-			yield(nil, err)
+			if !yield(nil, err) {
+				return seen, false
+			}
+			continue
+		}
+		if !yield(b, nil) {
+			return seen, false
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return seen, yield(nil, err)
+	}
+	return seen, true
+}
+
+func yieldRangeSuccessors(ctx context.Context, db *sql.DB, query string, args []any, version bsemver.Version, seen map[string]bool, yield func(bundlev1.Bundle, error) bool) {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		yield(nil, err)
+		return
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var bid, packageName, versionStr, releaseStr, uri, rangeStr string
+		if err := rows.Scan(&bid, &packageName, &versionStr, &releaseStr, &uri, &rangeStr); err != nil {
+			if !yield(nil, err) {
+				return
+			}
+			continue
+		}
+		if seen[bid] {
+			continue
+		}
+		rng, err := bsemver.ParseRange(rangeStr)
+		if err != nil {
+			if !yield(nil, fmt.Errorf("parse predecessor range %q: %w", rangeStr, err)) {
+				return
+			}
+			continue
+		}
+		if !rng(version) {
+			continue
+		}
+		seen[bid] = true
+		b, err := parseBundleRow(bid, packageName, versionStr, releaseStr, uri)
+		if err != nil {
+			if !yield(nil, err) {
+				return
+			}
+			continue
+		}
+		if !yield(b, nil) {
 			return
 		}
-		defer func() { _ = rows.Close() }()
-		yieldBundleRows(rows, yield)
 	}
+	if err := rows.Err(); err != nil {
+		yield(nil, err)
+	}
+}
+
+func parseBundleRow(id, packageName, versionStr, releaseStr, uri string) (BundleRow, error) {
+	var ver bsemver.Version
+	if versionStr != "" {
+		parsed, err := bsemver.Parse(versionStr)
+		if err != nil {
+			return BundleRow{}, fmt.Errorf("parse version %q: %w", versionStr, err)
+		}
+		ver = parsed
+	}
+	return BundleRow{
+		BundleID:    bundlev1.BundleID(id),
+		PackageName: packageName,
+		Version:     ver,
+		Release:     bundlev1.MustParseRelease(releaseStr),
+		BundleURI:   uri,
+	}, nil
 }
 
 func yieldBundleRows(rows *sql.Rows, yield func(bundlev1.Bundle, error) bool) {
@@ -262,24 +374,12 @@ func yieldBundleRows(rows *sql.Rows, yield func(bundlev1.Bundle, error) bool) {
 			}
 			continue
 		}
-		var ver bsemver.Version
-		if versionStr != "" {
-			var err error
-			ver, err = bsemver.Parse(versionStr)
-			if err != nil {
-				if !yield(nil, fmt.Errorf("parse version %q: %w", versionStr, err)) {
-					return
-				}
-				continue
+		b, err := parseBundleRow(id, packageName, versionStr, releaseStr, uri)
+		if err != nil {
+			if !yield(nil, err) {
+				return
 			}
-		}
-		rel := bundlev1.MustParseRelease(releaseStr)
-		b := BundleRow{
-			BundleID:    bundlev1.BundleID(id),
-			PackageName: packageName,
-			Version:     ver,
-			Release:     rel,
-			BundleURI:   uri,
+			continue
 		}
 		if !yield(b, nil) {
 			return

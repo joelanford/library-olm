@@ -84,7 +84,7 @@ func (h *OLMPackageHandler) Normalize(ctx context.Context, rawDB *sql.DB, w cata
 			}
 		}
 
-		if err := h.writeChannelSuccessors(rawDB, w, packageName, chGraphID, chName, entries); err != nil {
+		if err := h.writeChannelSuccessors(w, chGraphID, entries); err != nil {
 			return fmt.Errorf("compute successors for channel %q: %w", chName, err)
 		}
 	}
@@ -241,7 +241,7 @@ func (h *OLMPackageHandler) readChannelEntries(rawDB *sql.DB, packageName, chNam
 	return entries, nil
 }
 
-func (h *OLMPackageHandler) writeChannelSuccessors(rawDB *sql.DB, w catalogv1.Writer, packageName string, chGraphID catalogv1.GraphID, chName string, entries []channelEntry) error {
+func (h *OLMPackageHandler) writeChannelSuccessors(w catalogv1.Writer, chGraphID catalogv1.GraphID, entries []channelEntry) error {
 	for _, e := range entries {
 		// replaces edge: from the replaced bundle to this one
 		if e.replaces != "" {
@@ -249,7 +249,7 @@ func (h *OLMPackageHandler) writeChannelSuccessors(rawDB *sql.DB, w catalogv1.Wr
 			if err := w.InsertBundle(e.replaces, "", "", "", ""); err != nil {
 				return err
 			}
-			if err := w.AddSuccessor(chGraphID, e.replaces, e.name); err != nil {
+			if err := w.AddEdge(chGraphID, e.replaces, e.name); err != nil {
 				return err
 			}
 		}
@@ -259,53 +259,17 @@ func (h *OLMPackageHandler) writeChannelSuccessors(rawDB *sql.DB, w catalogv1.Wr
 			if err := w.InsertBundle(skip, "", "", "", ""); err != nil {
 				return err
 			}
-			if err := w.AddSuccessor(chGraphID, skip, e.name); err != nil {
+			if err := w.AddEdge(chGraphID, skip, e.name); err != nil {
 				return err
 			}
 		}
 
-		// skipRange edges: from every bundle in the channel whose version matches the range
+		// skipRange: store as a predecessor range, evaluated at query time
 		if e.skipRange != "" {
-			if err := h.writeSkipRangeSuccessors(rawDB, w, packageName, chGraphID, chName, e.name, e.skipRange); err != nil {
+			if err := w.AddPredecessorRange(chGraphID, e.name, e.skipRange); err != nil {
 				return fmt.Errorf("skipRange for %q: %w", e.name, err)
 			}
 		}
 	}
 	return nil
-}
-
-func (h *OLMPackageHandler) writeSkipRangeSuccessors(rawDB *sql.DB, w catalogv1.Writer, packageName string, chGraphID catalogv1.GraphID, chName string, bundleName string, skipRangeStr string) error {
-	rng, err := bsemver.ParseRange(skipRangeStr)
-	if err != nil {
-		return fmt.Errorf("parse skipRange %q: %w", skipRangeStr, err)
-	}
-
-	// Query raw tables for all bundles in the channel with their versions
-	rows, err := rawDB.Query(`
-		SELECT ce.bundle_name, b.version
-		FROM `+TableRawChannelEntry+` ce
-		JOIN `+TableRawBundle+` b ON b.name = ce.bundle_name AND b.package_name = ce.package_name
-		WHERE ce.package_name = ? AND ce.channel_name = ? AND ce.bundle_name != ?`,
-		packageName, chName, bundleName)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var name, versionStr string
-		if err := rows.Scan(&name, &versionStr); err != nil {
-			return err
-		}
-		ver, err := bsemver.Parse(versionStr)
-		if err != nil {
-			continue
-		}
-		if rng(ver) {
-			if err := w.AddSuccessor(chGraphID, name, bundleName); err != nil {
-				return err
-			}
-		}
-	}
-	return rows.Err()
 }

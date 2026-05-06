@@ -9,6 +9,8 @@ import (
 	"slices"
 	"testing/fstest"
 
+	bsemver "github.com/blang/semver/v4"
+
 	"github.com/joelanford/library-olm/catalog/fbc"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
@@ -105,8 +107,12 @@ func ExampleNewImporter() {
 	fmt.Println("stable bundles:", stableBundles)
 
 	// Find successors (upgrade targets) from v1.0.0 in the stable channel.
+	fromVersion, err := bsemver.Parse("1.0.0")
+	if err != nil {
+		log.Fatal(err)
+	}
 	var successors []string
-	for b, err := range stable.Successors(ctx, "my-operator.v1.0.0") {
+	for b, err := range stable.Successors(ctx, "my-operator.v1.0.0", fromVersion) {
 		if err != nil {
 			log.Fatal(err)
 		}

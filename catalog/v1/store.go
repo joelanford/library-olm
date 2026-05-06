@@ -10,7 +10,8 @@ type Writer interface {
 	InsertBundle(id, pkg, version, release, uri string) error
 	CreateGraph(name string, parent *GraphID) (GraphID, error)
 	AddBundleToGraph(graph GraphID, bundleID string) error
-	AddSuccessor(graph GraphID, fromBundleID, toBundleID string) error
+	AddEdge(graph GraphID, fromBundleID, toBundleID string) error
+	AddPredecessorRange(graph GraphID, bundleID, versionRange string) error
 }
 
 // Importer defines how catalog content is imported into a store via a Writer.

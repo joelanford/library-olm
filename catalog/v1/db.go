@@ -7,6 +7,7 @@ import (
 	"iter"
 	"maps"
 
+	bsemver "github.com/blang/semver/v4"
 	_ "modernc.org/sqlite"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
@@ -361,8 +362,8 @@ func (w *compositeUpdateGraphWrapper) ListBundles(ctx context.Context) iter.Seq2
 	return w.q.ListBundles(ctx)
 }
 
-func (w *compositeUpdateGraphWrapper) Successors(ctx context.Context, from bundlev1.BundleID) iter.Seq2[bundlev1.Bundle, error] {
-	return w.q.Successors(ctx, from)
+func (w *compositeUpdateGraphWrapper) Successors(ctx context.Context, fromID bundlev1.BundleID, fromVersion bsemver.Version) iter.Seq2[bundlev1.Bundle, error] {
+	return w.q.Successors(ctx, fromID, fromVersion)
 }
 
 func (w *compositeUpdateGraphWrapper) ListGraphs(ctx context.Context) iter.Seq2[UpdateGraph, error] {
@@ -411,8 +412,12 @@ func (w *writerAdapter) AddBundleToGraph(graph GraphID, bundleID string) error {
 	return w.cw.AddBundleToGraph(int64(graph), bundleID)
 }
 
-func (w *writerAdapter) AddSuccessor(graph GraphID, fromBundleID, toBundleID string) error {
-	return w.cw.AddSuccessor(int64(graph), fromBundleID, toBundleID)
+func (w *writerAdapter) AddEdge(graph GraphID, fromBundleID, toBundleID string) error {
+	return w.cw.AddEdge(int64(graph), fromBundleID, toBundleID)
+}
+
+func (w *writerAdapter) AddPredecessorRange(graph GraphID, bundleID, versionRange string) error {
+	return w.cw.AddPredecessorRange(int64(graph), bundleID, versionRange)
 }
 
 // Compile-time interface checks.
