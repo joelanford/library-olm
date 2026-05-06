@@ -1,5 +1,6 @@
 ---
-status: in-progress
+status: pr-submitted
+pr: https://github.com/joelanford/library-olm/pull/2
 ---
 # Persistent Catalog DB
 
@@ -19,12 +20,12 @@ The current design conflates format-specific logic (FBC parsing, handler dispatc
 
 ### Two-layer schema
 
-**Metadata layer** — stable, migratable schema. Tracks which catalogs exist and their metadata. Uses standard database migrations so `OpenStore` always succeeds, even across library version changes. The metadata layer survives content rebuilds.
+**Metadata layer** — stable, migratable schema. Tracks which catalogs exist and their metadata. Uses standard database migrations so `OpenStore` succeeds even when the content schema is incompatible with the current library version. The metadata layer survives content rebuilds.
 
 **Content layer** — normalized catalog data (bundles, graphs, successors). This is derived data rebuilt from source. On content schema mismatch, the content tables are dropped and recreated with the new schema. Metadata is preserved, and the caller re-imports using the URIs from the metadata layer.
 
 On `OpenStore`:
-1. Migrate the metadata schema forward (always succeeds)
+1. Migrate the metadata schema forward
 2. Check the content schema version
 3. If mismatch, drop all non-metadata tables (query `sqlite_master`, keep only the known metadata tables: `catalog_metadata`, `catalog_labels`, `metadata_schema_version`) and recreate content tables with the new schema
 
@@ -45,13 +46,13 @@ type Catalog interface {
 }
 ```
 
-Catalogs returned by `Get` or `List` have metadata always populated. Content queries (`ListPackages`, `GetPackage`) are lazy — they query the DB on demand. If content has not been imported yet, content queries return empty results.
+Catalogs returned by `Get` or `List` are snapshots: metadata (Name, URI, Digest, Priority, Labels) reflects the state at query time. Subsequent `Set` calls do not update previously returned `Catalog` values — call `Get` again for fresh metadata. Content queries (`ListPackages`, `GetPackage`) are lazy — they query the DB on demand. If content has not been imported yet, content queries return empty results.
 
 ### Store interface (`catalog/v1`)
 
 ```go
 type Store interface {
-    Set(ctx context.Context, name string, opts ...SetOption) error
+    Set(ctx context.Context, name string, opts ...SetOption) (Catalog, error)
     Get(name string) (Catalog, error)
     Delete(name string) error
     List() ([]Catalog, error)
@@ -68,9 +69,9 @@ func WithContent(importer Importer, digest string) SetOption
 func OpenStore(path string) (Store, error)
 ```
 
-`OpenStore` opens or creates the SQLite file. It migrates the metadata schema forward and checks the content schema version. If the content schema is incompatible, all non-metadata tables are dropped and recreated. The returned `Store` is an unexported `*db` type. `OpenStore` always succeeds (unless the file is unreadable).
+`OpenStore` opens or creates the SQLite file. It migrates the metadata schema forward and checks the content schema version. If the content schema is incompatible, all non-metadata tables are dropped and recreated. The returned `Store` is an unexported `*db` type. A content schema mismatch is not an error — `OpenStore` handles it transparently by rebuilding content tables and clearing digests. Only genuine failures (unreadable file, I/O errors, corrupt metadata) cause `OpenStore` to return an error.
 
-`Set` atomically creates or updates a catalog entry. For new entries, `WithURI` is required — without a URI the catalog cannot be re-imported after a content rebuild. For existing entries, all options are optional; unspecified fields keep their current values. When `WithContent` is provided, the importer runs within the same transaction as the metadata update, and the digest is stored alongside the content. The entire `Set` call is atomic — metadata and content either both succeed or both roll back.
+`Set` atomically creates or updates a catalog entry and returns the resulting `Catalog`. For new entries, `WithURI` is required — without a URI the catalog cannot be re-imported after a content rebuild. For existing entries, all options are optional; unspecified fields keep their current values. When `WithContent` is provided, the importer runs within the same transaction as the metadata update, and the digest is stored alongside the content. The entire `Set` call is atomic — metadata and content either both succeed or both roll back.
 
 When content tables are rebuilt on open, all digests are cleared. The caller checks `Digest()` on each catalog to determine which need re-importing.
 

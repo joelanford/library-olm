@@ -28,6 +28,12 @@ type PartialImportError interface {
 }
 
 // Store manages a collection of named catalogs backed by persistent storage.
+//
+// Catalog values returned by Get and List are snapshots: their metadata
+// (Name, URI, Digest, Priority, Labels) reflects the state at query time.
+// Subsequent Set calls do not update previously returned Catalog values.
+// Call Get again to obtain fresh metadata. Content queries (ListPackages,
+// GetPackage) always read from the underlying database on demand.
 type Store interface {
 	Set(ctx context.Context, name string, opts ...SetOption) (Catalog, error)
 	Get(name string) (Catalog, error)

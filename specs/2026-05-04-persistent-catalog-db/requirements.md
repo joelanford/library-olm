@@ -9,7 +9,7 @@
 - `Get` returns a `catalogv1.Catalog` with metadata and lazy content queries
 - `Delete` removes a catalog entry and its associated content
 - `List` returns all catalog entries as `[]Catalog`
-- Metadata schema uses standard migrations — `OpenStore` always succeeds
+- Metadata schema uses standard migrations — `OpenStore` handles content schema mismatches transparently
 - Metadata survives content schema changes
 
 ## Content layer
