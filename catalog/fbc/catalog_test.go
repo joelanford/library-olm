@@ -580,7 +580,7 @@ func requirePackageError(t *testing.T, err error, pkg string, msgSubstring strin
 	require.True(t, found, "expected PackageError for package %q, got: %v", pkg, err)
 }
 
-func assertEmptyCatalog(t *testing.T, ctx context.Context, cat *Catalog) {
+func assertEmptyCatalog(t *testing.T, ctx context.Context, cat catalogv1.Catalog) {
 	t.Helper()
 	var count int
 	for _, err := range cat.ListPackages(ctx) {

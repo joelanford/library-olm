@@ -17,9 +17,11 @@ func NewContentWriter(tx *sql.Tx, catalogName string) *ContentWriter {
 }
 
 // InsertBundle inserts a bundle into the content_bundles table.
+// If a bundle with the same ID already exists for this catalog, the insert
+// is silently ignored (idempotent for phantom bundles).
 func (w *ContentWriter) InsertBundle(id, pkg, version, release, uri string) error {
 	_, err := w.tx.Exec(
-		"INSERT INTO content_bundles (catalog_name, bundle_id, package_name, version, release, uri) VALUES (?, ?, ?, ?, ?, ?)",
+		"INSERT OR IGNORE INTO content_bundles (catalog_name, bundle_id, package_name, version, release, uri) VALUES (?, ?, ?, ?, ?, ?)",
 		w.catalogName, id, pkg, version, release, uri,
 	)
 	if err != nil {
@@ -62,9 +64,10 @@ func (w *ContentWriter) AddBundleToGraph(graphID int64, bundleID string) error {
 }
 
 // AddSuccessor adds a successor relationship between two bundles in a graph.
+// Duplicate successor edges are silently ignored.
 func (w *ContentWriter) AddSuccessor(graphID int64, fromBundleID, toBundleID string) error {
 	_, err := w.tx.Exec(`
-		INSERT INTO content_successors (graph_id, from_bundle_id, to_bundle_id)
+		INSERT OR IGNORE INTO content_successors (graph_id, from_bundle_id, to_bundle_id)
 		VALUES (?,
 			(SELECT id FROM content_bundles WHERE bundle_id = ? AND catalog_name = ?),
 			(SELECT id FROM content_bundles WHERE bundle_id = ? AND catalog_name = ?))`,

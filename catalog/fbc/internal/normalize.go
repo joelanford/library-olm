@@ -4,14 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
 type NormalizeResult struct {
 	PackageErrors map[string][]error
 }
 
-func Normalize(ctx context.Context, db *sql.DB, registry *HandlerRegistry, skipPackages map[string]bool) (*NormalizeResult, error) {
-	rows, err := db.QueryContext(ctx, "SELECT package_name FROM "+TableRawPackage)
+func Normalize(ctx context.Context, rawDB *sql.DB, registry *HandlerRegistry, skipPackages map[string]bool, w catalogv1.Writer) (*NormalizeResult, error) {
+	rows, err := rawDB.QueryContext(ctx, "SELECT package_name FROM "+TableRawPackage)
 	if err != nil {
 		return nil, fmt.Errorf("listing packages: %w", err)
 	}
@@ -40,21 +42,9 @@ func Normalize(ctx context.Context, db *sql.DB, registry *HandlerRegistry, skipP
 			return nil, fmt.Errorf("package %q: %w", pkgName, err)
 		}
 
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			return nil, fmt.Errorf("begin transaction for %q: %w", pkgName, err)
-		}
-
-		if err := handler.Normalize(ctx, tx, pkgName); err != nil {
-			if rbErr := tx.Rollback(); rbErr != nil {
-				return nil, fmt.Errorf("rollback for %q: %w", pkgName, rbErr)
-			}
+		if err := handler.Normalize(ctx, rawDB, w, pkgName); err != nil {
 			pkgErrors[pkgName] = append(pkgErrors[pkgName], fmt.Errorf("normalize: %w", err))
 			continue
-		}
-
-		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit normalization for %q: %w", pkgName, err)
 		}
 	}
 	return &NormalizeResult{PackageErrors: pkgErrors}, nil

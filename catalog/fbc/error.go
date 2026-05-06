@@ -24,6 +24,14 @@ func (e *PackageError) Error() string {
 
 func (e *PackageError) Unwrap() []error { return e.Errs }
 
+type importError struct {
+	err error
+}
+
+func (e *importError) Error() string   { return e.err.Error() }
+func (e *importError) Unwrap() []error { return e.err.(interface{ Unwrap() []error }).Unwrap() }
+func (e *importError) PartialImport()  {}
+
 func mergePackageErrors(pkgErrMaps ...map[string][]error) error {
 	merged := mergeMapSlices(pkgErrMaps...)
 	pkgErrs := make([]error, 0, len(merged))
@@ -33,7 +41,10 @@ func mergePackageErrors(pkgErrMaps ...map[string][]error) error {
 		})
 		pkgErrs = append(pkgErrs, &PackageError{Package: pkg, Errs: errs})
 	}
-	return errors.Join(pkgErrs...)
+	if joined := errors.Join(pkgErrs...); joined != nil {
+		return &importError{err: joined}
+	}
+	return nil
 }
 
 func mergeMapSlices[K comparable, V any](ms ...map[K][]V) map[K][]V {

@@ -4,18 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
 // PackageSchemaHandler normalizes a package and its companion blobs
-// from the raw tables into the normalized tables.
+// from the raw tables into the normalized content via a Writer.
 type PackageSchemaHandler interface {
 	// Schema returns the package schema this handler processes (e.g. "olm.package").
 	Schema() string
 
 	// Normalize validates the package's neighborhood in the raw tables
-	// and populates the normalized tables (bundles, graphs, successor edges).
+	// and writes normalized content (bundles, graphs, successor edges)
+	// through the Writer. The rawDB is used for reading raw staging tables.
 	// Called once per package during the normalization phase.
-	Normalize(ctx context.Context, tx *sql.Tx, packageName string) error
+	Normalize(ctx context.Context, rawDB *sql.DB, w catalogv1.Writer, packageName string) error
 }
 
 // HandlerRegistry maps package schema strings to their handlers.
