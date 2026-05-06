@@ -9,10 +9,23 @@ import (
 	bsemver "github.com/blang/semver/v4"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
-	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
-// BundleRow implements bundlev1.Bundle backed by a row from the normalized bundles table.
+func tableExists(db *sql.DB, name string) (bool, error) {
+	var n int
+	err := db.QueryRow(
+		"SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", name,
+	).Scan(&n)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// BundleRow implements bundlev1.Bundle backed by a row from the content_bundles table.
 type BundleRow struct {
 	BundleID    bundlev1.BundleID
 	PackageName string
@@ -27,14 +40,21 @@ func (b BundleRow) NameVersionRelease() bundlev1.NameVersionRelease {
 }
 func (b BundleRow) URI() string { return b.BundleURI }
 
-// CatalogQuery implements catalogv1.Catalog backed by normalized SQLite tables.
+// CatalogQuery provides catalog query operations scoped to a single catalog
+// within the shared content tables.
 type CatalogQuery struct {
-	DB *sql.DB
+	DB          *sql.DB
+	CatalogName string
 }
 
-func (c *CatalogQuery) ListPackages(ctx context.Context) iter.Seq2[catalogv1.UpdateGraph, error] {
-	return func(yield func(catalogv1.UpdateGraph, error) bool) {
-		rows, err := c.DB.QueryContext(ctx, "SELECT id, name FROM graphs WHERE parent_id IS NULL ORDER BY name")
+// ListPackages returns an iterator over the top-level composite update graphs
+// (packages) for this catalog.
+func (c *CatalogQuery) ListPackages(ctx context.Context) iter.Seq2[*CompositeUpdateGraphQuery, error] {
+	return func(yield func(*CompositeUpdateGraphQuery, error) bool) {
+		rows, err := c.DB.QueryContext(ctx,
+			"SELECT id, name FROM content_graphs WHERE parent_id IS NULL AND catalog_name = ? ORDER BY name",
+			c.CatalogName,
+		)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -59,9 +79,13 @@ func (c *CatalogQuery) ListPackages(ctx context.Context) iter.Seq2[catalogv1.Upd
 	}
 }
 
-func (c *CatalogQuery) GetPackage(ctx context.Context, name string) (catalogv1.UpdateGraph, error) {
+// GetPackage returns the composite update graph for a specific package in this catalog.
+func (c *CatalogQuery) GetPackage(ctx context.Context, name string) (*CompositeUpdateGraphQuery, error) {
 	var id int64
-	err := c.DB.QueryRowContext(ctx, "SELECT id FROM graphs WHERE name = ? AND parent_id IS NULL", name).Scan(&id)
+	err := c.DB.QueryRowContext(ctx,
+		"SELECT id FROM content_graphs WHERE name = ? AND parent_id IS NULL AND catalog_name = ?",
+		name, c.CatalogName,
+	).Scan(&id)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("package %q not found", name)
 	}
@@ -71,7 +95,8 @@ func (c *CatalogQuery) GetPackage(ctx context.Context, name string) (catalogv1.U
 	return &CompositeUpdateGraphQuery{DB: c.DB, GraphID: id, GraphName: name}, nil
 }
 
-// CompositeUpdateGraphQuery implements catalogv1.CompositeUpdateGraph.
+// CompositeUpdateGraphQuery provides query operations for a composite update graph
+// (a package with child graphs like channels).
 type CompositeUpdateGraphQuery struct {
 	DB        *sql.DB
 	GraphID   int64
@@ -88,9 +113,12 @@ func (g *CompositeUpdateGraphQuery) Successors(ctx context.Context, from bundlev
 	return querySuccessorsDescendant(ctx, g.DB, g.GraphID, from)
 }
 
-func (g *CompositeUpdateGraphQuery) ListGraphs(ctx context.Context) iter.Seq2[catalogv1.UpdateGraph, error] {
-	return func(yield func(catalogv1.UpdateGraph, error) bool) {
-		rows, err := g.DB.QueryContext(ctx, "SELECT id, name FROM graphs WHERE parent_id = ? ORDER BY name", g.GraphID)
+// ListGraphs returns an iterator over the child update graphs.
+func (g *CompositeUpdateGraphQuery) ListGraphs(ctx context.Context) iter.Seq2[*UpdateGraphQuery, error] {
+	return func(yield func(*UpdateGraphQuery, error) bool) {
+		rows, err := g.DB.QueryContext(ctx,
+			"SELECT id, name FROM content_graphs WHERE parent_id = ? ORDER BY name", g.GraphID,
+		)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -115,9 +143,12 @@ func (g *CompositeUpdateGraphQuery) ListGraphs(ctx context.Context) iter.Seq2[ca
 	}
 }
 
-func (g *CompositeUpdateGraphQuery) GetGraph(ctx context.Context, name string) (catalogv1.UpdateGraph, error) {
+// GetGraph returns a specific child update graph by name.
+func (g *CompositeUpdateGraphQuery) GetGraph(ctx context.Context, name string) (*UpdateGraphQuery, error) {
 	var id int64
-	err := g.DB.QueryRowContext(ctx, "SELECT id FROM graphs WHERE name = ? AND parent_id = ?", name, g.GraphID).Scan(&id)
+	err := g.DB.QueryRowContext(ctx,
+		"SELECT id FROM content_graphs WHERE name = ? AND parent_id = ?", name, g.GraphID,
+	).Scan(&id)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("graph %q not found in %q", name, g.GraphName)
 	}
@@ -127,7 +158,7 @@ func (g *CompositeUpdateGraphQuery) GetGraph(ctx context.Context, name string) (
 	return &UpdateGraphQuery{DB: g.DB, GraphID: id, GraphName: name}, nil
 }
 
-// UpdateGraphQuery implements catalogv1.UpdateGraph for a leaf graph (e.g. a channel).
+// UpdateGraphQuery provides query operations for a leaf update graph (e.g. a channel).
 type UpdateGraphQuery struct {
 	DB        *sql.DB
 	GraphID   int64
@@ -148,8 +179,8 @@ func queryBundlesDirect(ctx context.Context, db *sql.DB, graphID int64) iter.Seq
 	return func(yield func(bundlev1.Bundle, error) bool) {
 		rows, err := db.QueryContext(ctx, `
 			SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri
-			FROM graph_bundles gb
-			JOIN bundles b ON b.id = gb.bundle_id
+			FROM content_graph_bundles gb
+			JOIN content_bundles b ON b.id = gb.bundle_id
 			WHERE gb.graph_id = ? AND b.version != ''
 			ORDER BY b.bundle_id`, graphID)
 		if err != nil {
@@ -165,13 +196,13 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, graphID int64) iter
 	return func(yield func(bundlev1.Bundle, error) bool) {
 		rows, err := db.QueryContext(ctx, `
 			WITH RECURSIVE descendants(id) AS (
-				SELECT id FROM graphs WHERE parent_id = ?
+				SELECT id FROM content_graphs WHERE parent_id = ?
 				UNION ALL
-				SELECT g.id FROM graphs g JOIN descendants d ON g.parent_id = d.id
+				SELECT g.id FROM content_graphs g JOIN descendants d ON g.parent_id = d.id
 			)
 			SELECT DISTINCT b.bundle_id, b.package_name, b.version, b.release, b.uri
-			FROM graph_bundles gb
-			JOIN bundles b ON b.id = gb.bundle_id
+			FROM content_graph_bundles gb
+			JOIN content_bundles b ON b.id = gb.bundle_id
 			WHERE gb.graph_id IN (SELECT id FROM descendants) AND b.version != ''
 			ORDER BY b.bundle_id`, graphID)
 		if err != nil {
@@ -187,9 +218,9 @@ func querySuccessorsDirect(ctx context.Context, db *sql.DB, graphID int64, from 
 	return func(yield func(bundlev1.Bundle, error) bool) {
 		rows, err := db.QueryContext(ctx, `
 			SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri
-			FROM successors s
-			JOIN bundles b ON b.id = s.to_bundle_id
-			WHERE s.graph_id = ? AND s.from_bundle_id = (SELECT id FROM bundles WHERE bundle_id = ?)
+			FROM content_successors s
+			JOIN content_bundles b ON b.id = s.to_bundle_id
+			WHERE s.graph_id = ? AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE bundle_id = ?)
 			ORDER BY b.bundle_id`, graphID, string(from))
 		if err != nil {
 			yield(nil, err)
@@ -204,14 +235,14 @@ func querySuccessorsDescendant(ctx context.Context, db *sql.DB, graphID int64, f
 	return func(yield func(bundlev1.Bundle, error) bool) {
 		rows, err := db.QueryContext(ctx, `
 			WITH RECURSIVE descendants(id) AS (
-				SELECT id FROM graphs WHERE parent_id = ?
+				SELECT id FROM content_graphs WHERE parent_id = ?
 				UNION ALL
-				SELECT g.id FROM graphs g JOIN descendants d ON g.parent_id = d.id
+				SELECT g.id FROM content_graphs g JOIN descendants d ON g.parent_id = d.id
 			)
 			SELECT DISTINCT b.bundle_id, b.package_name, b.version, b.release, b.uri
-			FROM successors s
-			JOIN bundles b ON b.id = s.to_bundle_id
-			WHERE s.graph_id IN (SELECT id FROM descendants) AND s.from_bundle_id = (SELECT id FROM bundles WHERE bundle_id = ?)
+			FROM content_successors s
+			JOIN content_bundles b ON b.id = s.to_bundle_id
+			WHERE s.graph_id IN (SELECT id FROM descendants) AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE bundle_id = ?)
 			ORDER BY b.bundle_id`, graphID, string(from))
 		if err != nil {
 			yield(nil, err)

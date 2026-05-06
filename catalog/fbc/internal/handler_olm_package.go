@@ -11,39 +11,89 @@ import (
 	"go.podman.io/image/v5/docker/reference"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
+	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
 type OLMPackageHandler struct{}
 
 func (h *OLMPackageHandler) Schema() string { return declcfg.SchemaPackage }
 
-func (h *OLMPackageHandler) Normalize(ctx context.Context, tx *sql.Tx, packageName string) error {
-	if err := h.validate(tx, packageName); err != nil {
+// validatedBundle holds bundle data that has passed validation and is ready to write.
+type validatedBundle struct {
+	name    string
+	pkg     string
+	version string
+	release string
+	uri     string
+}
+
+func (h *OLMPackageHandler) Normalize(ctx context.Context, rawDB *sql.DB, w catalogv1.Writer, packageName string) error {
+	// Phase 1: Validate everything by reading raw tables.
+	if err := h.validate(rawDB, packageName); err != nil {
 		return fmt.Errorf("validate package %q: %w", packageName, err)
 	}
 
-	pkgGraphID, err := h.insertPackageGraph(tx, packageName)
+	bundles, err := h.validateBundles(rawDB, packageName)
+	if err != nil {
+		return fmt.Errorf("validate bundles for %q: %w", packageName, err)
+	}
+
+	channels, err := h.readChannels(rawDB, packageName)
+	if err != nil {
+		return fmt.Errorf("read channels for %q: %w", packageName, err)
+	}
+
+	channelEntries, err := h.readAllChannelEntries(rawDB, packageName, channels)
+	if err != nil {
+		return fmt.Errorf("read channel entries for %q: %w", packageName, err)
+	}
+
+	// Validate skipRanges before writing anything.
+	for chName, entries := range channelEntries {
+		for _, e := range entries {
+			if e.skipRange != "" {
+				if _, parseErr := bsemver.ParseRange(e.skipRange); parseErr != nil {
+					return fmt.Errorf("channel %q: skipRange for %q: parse skipRange %q: %w", chName, e.name, e.skipRange, parseErr)
+				}
+			}
+		}
+	}
+
+	// Phase 2: All validation passed. Write everything.
+	pkgGraphID, err := w.CreateGraph(packageName, nil)
 	if err != nil {
 		return fmt.Errorf("insert package graph %q: %w", packageName, err)
 	}
 
-	if err := h.insertBundles(tx, packageName); err != nil {
-		return fmt.Errorf("insert bundles for %q: %w", packageName, err)
+	for _, b := range bundles {
+		if err := w.InsertBundle(b.name, b.pkg, b.version, b.release, b.uri); err != nil {
+			return fmt.Errorf("insert bundle %q: %w", b.name, err)
+		}
 	}
 
-	if err := h.insertChannelGraphsAndEntries(tx, packageName, pkgGraphID); err != nil {
-		return fmt.Errorf("insert channel graphs for %q: %w", packageName, err)
-	}
+	for _, chName := range channels {
+		chGraphID, err := w.CreateGraph(chName, &pkgGraphID)
+		if err != nil {
+			return fmt.Errorf("insert graph for channel %q: %w", chName, err)
+		}
 
-	if err := h.computeSuccessors(tx, packageName, pkgGraphID); err != nil {
-		return fmt.Errorf("compute successors for %q: %w", packageName, err)
+		entries := channelEntries[chName]
+		for _, e := range entries {
+			if err := w.AddBundleToGraph(chGraphID, e.name); err != nil {
+				return fmt.Errorf("add bundle %q to channel %q: %w", e.name, chName, err)
+			}
+		}
+
+		if err := h.writeChannelSuccessors(rawDB, w, packageName, chGraphID, chName, entries); err != nil {
+			return fmt.Errorf("compute successors for channel %q: %w", chName, err)
+		}
 	}
 
 	return nil
 }
 
-func (h *OLMPackageHandler) validate(tx *sql.Tx, packageName string) error {
-	rows, err := tx.Query(`
+func (h *OLMPackageHandler) validate(rawDB *sql.DB, packageName string) error {
+	rows, err := rawDB.Query(`
 		SELECT ce.channel_name, ce.bundle_name
 		FROM `+TableRawChannelEntry+` ce
 		WHERE ce.package_name = ?
@@ -73,152 +123,111 @@ func (h *OLMPackageHandler) validate(tx *sql.Tx, packageName string) error {
 	return nil
 }
 
-func (h *OLMPackageHandler) insertPackageGraph(tx *sql.Tx, packageName string) (int64, error) {
-	res, err := tx.Exec("INSERT INTO graphs (name, parent_id) VALUES (?, NULL)", packageName)
+// validateBundles reads all bundles for a package from raw tables, validates
+// each one, and returns the validated data ready for writing.
+func (h *OLMPackageHandler) validateBundles(rawDB *sql.DB, packageName string) ([]validatedBundle, error) {
+	rows, err := rawDB.Query("SELECT name, version, release, image FROM "+TableRawBundle+" WHERE package_name = ?", packageName)
 	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
-}
-
-func (h *OLMPackageHandler) insertBundles(tx *sql.Tx, packageName string) error {
-	rows, err := tx.Query("SELECT name, version, release, image FROM "+TableRawBundle+" WHERE package_name = ?", packageName)
-	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
+	var bundles []validatedBundle
 	for rows.Next() {
 		var name, versionStr, releaseStr, image string
 		if err := rows.Scan(&name, &versionStr, &releaseStr, &image); err != nil {
-			return err
+			return nil, err
 		}
 		if _, err := bsemver.Parse(versionStr); err != nil {
-			return fmt.Errorf("parse version %q for bundle %q: %w", versionStr, name, err)
+			return nil, fmt.Errorf("parse version %q for bundle %q: %w", versionStr, name, err)
 		}
 		if releaseStr != "" {
 			if _, err := bundlev1.ParseRelease(releaseStr); err != nil {
-				return fmt.Errorf("parse release %q for bundle %q: %w", releaseStr, name, err)
+				return nil, fmt.Errorf("parse release %q for bundle %q: %w", releaseStr, name, err)
 			}
 		}
 		if image == "" {
-			return fmt.Errorf("bundle %q has no image", name)
+			return nil, fmt.Errorf("bundle %q has no image", name)
 		}
 		ref, err := reference.ParseNamed(image)
 		if err != nil {
-			return fmt.Errorf("parse image %q for bundle %q: %w", image, name, err)
+			return nil, fmt.Errorf("parse image %q for bundle %q: %w", image, name, err)
 		}
 		if _, ok := ref.(reference.NamedTagged); !ok {
 			if _, ok := ref.(reference.Canonical); !ok {
-				return fmt.Errorf("image %q for bundle %q must be tagged or canonical", image, name)
+				return nil, fmt.Errorf("image %q for bundle %q must be tagged or canonical", image, name)
 			}
 		}
-		uri := "docker://" + ref.String()
-		if _, err := tx.Exec(
-			"INSERT OR IGNORE INTO bundles (bundle_id, package_name, version, release, uri) VALUES (?, ?, ?, ?, ?)",
-			name, packageName, versionStr, releaseStr, uri,
-		); err != nil {
-			return err
-		}
+		bundles = append(bundles, validatedBundle{
+			name:    name,
+			pkg:     packageName,
+			version: versionStr,
+			release: releaseStr,
+			uri:     "docker://" + ref.String(),
+		})
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return bundles, nil
 }
 
-func (h *OLMPackageHandler) insertChannelGraphsAndEntries(tx *sql.Tx, packageName string, pkgGraphID int64) error {
-	chRows, err := tx.Query("SELECT name FROM "+TableRawChannel+" WHERE package_name = ?", packageName)
+func (h *OLMPackageHandler) readChannels(rawDB *sql.DB, packageName string) ([]string, error) {
+	rows, err := rawDB.Query("SELECT name FROM "+TableRawChannel+" WHERE package_name = ?", packageName)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func() { _ = chRows.Close() }()
+	defer func() { _ = rows.Close() }()
 
 	var channels []string
-	for chRows.Next() {
+	for rows.Next() {
 		var name string
-		if err := chRows.Scan(&name); err != nil {
-			return err
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
 		}
 		channels = append(channels, name)
 	}
-	if err := chRows.Err(); err != nil {
-		return err
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
+	return channels, nil
+}
 
+type channelEntry struct {
+	name      string
+	replaces  string
+	skips     []string
+	skipRange string
+}
+
+func (h *OLMPackageHandler) readAllChannelEntries(rawDB *sql.DB, packageName string, channels []string) (map[string][]channelEntry, error) {
+	result := make(map[string][]channelEntry, len(channels))
 	for _, chName := range channels {
-		res, err := tx.Exec("INSERT INTO graphs (name, parent_id) VALUES (?, ?)", chName, pkgGraphID)
+		entries, err := h.readChannelEntries(rawDB, packageName, chName)
 		if err != nil {
-			return fmt.Errorf("insert graph for channel %q: %w", chName, err)
+			return nil, fmt.Errorf("channel %q: %w", chName, err)
 		}
-		chGraphID, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-
-		if _, err := tx.Exec(`
-			INSERT INTO graph_bundles (graph_id, bundle_id)
-			SELECT ?, b.id
-			FROM `+TableRawChannelEntry+` ce
-			JOIN bundles b ON b.bundle_id = ce.bundle_name
-			WHERE ce.package_name = ? AND ce.channel_name = ?`,
-			chGraphID, packageName, chName); err != nil {
-			return fmt.Errorf("insert graph_bundles for channel %q: %w", chName, err)
-		}
+		result[chName] = entries
 	}
-	return nil
+	return result, nil
 }
 
-func (h *OLMPackageHandler) computeSuccessors(tx *sql.Tx, packageName string, pkgGraphID int64) error {
-	chRows, err := tx.Query("SELECT id, name FROM graphs WHERE parent_id = ?", pkgGraphID)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = chRows.Close() }()
-
-	type channelInfo struct {
-		id   int64
-		name string
-	}
-	var channels []channelInfo
-	for chRows.Next() {
-		var ci channelInfo
-		if err := chRows.Scan(&ci.id, &ci.name); err != nil {
-			return err
-		}
-		channels = append(channels, ci)
-	}
-	if err := chRows.Err(); err != nil {
-		return err
-	}
-
-	for _, ch := range channels {
-		if err := h.computeChannelSuccessors(tx, packageName, ch.id, ch.name); err != nil {
-			return fmt.Errorf("compute successors for channel %q: %w", ch.name, err)
-		}
-	}
-	return nil
-}
-
-func (h *OLMPackageHandler) computeChannelSuccessors(tx *sql.Tx, packageName string, chGraphID int64, chName string) error {
-	entryRows, err := tx.Query(`
+func (h *OLMPackageHandler) readChannelEntries(rawDB *sql.DB, packageName, chName string) ([]channelEntry, error) {
+	rows, err := rawDB.Query(`
 		SELECT ce.bundle_name, ce.replaces, ce.skips, ce.skip_range
 		FROM `+TableRawChannelEntry+` ce
 		WHERE ce.package_name = ? AND ce.channel_name = ?`, packageName, chName)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func() { _ = entryRows.Close() }()
+	defer func() { _ = rows.Close() }()
 
-	type entry struct {
-		name      string
-		replaces  string
-		skips     []string
-		skipRange string
-	}
-	var entries []entry
-	for entryRows.Next() {
-		var e entry
+	var entries []channelEntry
+	for rows.Next() {
+		var e channelEntry
 		var skipsStr, skipRange string
-		if err := entryRows.Scan(&e.name, &e.replaces, &skipsStr, &skipRange); err != nil {
-			return err
+		if err := rows.Scan(&e.name, &e.replaces, &skipsStr, &skipRange); err != nil {
+			return nil, err
 		}
 		if skipsStr != "" {
 			e.skips = strings.Split(skipsStr, ",")
@@ -226,34 +235,38 @@ func (h *OLMPackageHandler) computeChannelSuccessors(tx *sql.Tx, packageName str
 		e.skipRange = skipRange
 		entries = append(entries, e)
 	}
-	if err := entryRows.Err(); err != nil {
-		return err
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
+	return entries, nil
+}
 
+func (h *OLMPackageHandler) writeChannelSuccessors(rawDB *sql.DB, w catalogv1.Writer, packageName string, chGraphID catalogv1.GraphID, chName string, entries []channelEntry) error {
 	for _, e := range entries {
 		// replaces edge: from the replaced bundle to this one
 		if e.replaces != "" {
-			if err := h.ensurePhantomBundle(tx, e.replaces); err != nil {
+			// Ensure phantom bundle exists (INSERT OR IGNORE via Writer)
+			if err := w.InsertBundle(e.replaces, "", "", "", ""); err != nil {
 				return err
 			}
-			if err := h.insertSuccessor(tx, chGraphID, e.replaces, e.name); err != nil {
+			if err := w.AddSuccessor(chGraphID, e.replaces, e.name); err != nil {
 				return err
 			}
 		}
 
 		// skips edges: from each skipped bundle to this one
 		for _, skip := range e.skips {
-			if err := h.ensurePhantomBundle(tx, skip); err != nil {
+			if err := w.InsertBundle(skip, "", "", "", ""); err != nil {
 				return err
 			}
-			if err := h.insertSuccessor(tx, chGraphID, skip, e.name); err != nil {
+			if err := w.AddSuccessor(chGraphID, skip, e.name); err != nil {
 				return err
 			}
 		}
 
 		// skipRange edges: from every bundle in the channel whose version matches the range
 		if e.skipRange != "" {
-			if err := h.computeSkipRangeSuccessors(tx, chGraphID, e.name, e.skipRange); err != nil {
+			if err := h.writeSkipRangeSuccessors(rawDB, w, packageName, chGraphID, chName, e.name, e.skipRange); err != nil {
 				return fmt.Errorf("skipRange for %q: %w", e.name, err)
 			}
 		}
@@ -261,22 +274,19 @@ func (h *OLMPackageHandler) computeChannelSuccessors(tx *sql.Tx, packageName str
 	return nil
 }
 
-func (h *OLMPackageHandler) ensurePhantomBundle(tx *sql.Tx, bundleName string) error {
-	_, err := tx.Exec("INSERT OR IGNORE INTO bundles (bundle_id) VALUES (?)", bundleName)
-	return err
-}
-
-func (h *OLMPackageHandler) computeSkipRangeSuccessors(tx *sql.Tx, chGraphID int64, bundleName string, skipRangeStr string) error {
+func (h *OLMPackageHandler) writeSkipRangeSuccessors(rawDB *sql.DB, w catalogv1.Writer, packageName string, chGraphID catalogv1.GraphID, chName string, bundleName string, skipRangeStr string) error {
 	rng, err := bsemver.ParseRange(skipRangeStr)
 	if err != nil {
 		return fmt.Errorf("parse skipRange %q: %w", skipRangeStr, err)
 	}
 
-	rows, err := tx.Query(`
-		SELECT b.bundle_id, b.version
-		FROM graph_bundles gb
-		JOIN bundles b ON b.id = gb.bundle_id
-		WHERE gb.graph_id = ? AND b.bundle_id != ? AND b.version != ''`, chGraphID, bundleName)
+	// Query raw tables for all bundles in the channel with their versions
+	rows, err := rawDB.Query(`
+		SELECT ce.bundle_name, b.version
+		FROM `+TableRawChannelEntry+` ce
+		JOIN `+TableRawBundle+` b ON b.name = ce.bundle_name AND b.package_name = ce.package_name
+		WHERE ce.package_name = ? AND ce.channel_name = ? AND ce.bundle_name != ?`,
+		packageName, chName, bundleName)
 	if err != nil {
 		return err
 	}
@@ -292,18 +302,10 @@ func (h *OLMPackageHandler) computeSkipRangeSuccessors(tx *sql.Tx, chGraphID int
 			continue
 		}
 		if rng(ver) {
-			if err := h.insertSuccessor(tx, chGraphID, name, bundleName); err != nil {
+			if err := w.AddSuccessor(chGraphID, name, bundleName); err != nil {
 				return err
 			}
 		}
 	}
 	return rows.Err()
-}
-
-func (h *OLMPackageHandler) insertSuccessor(tx *sql.Tx, graphID int64, fromBundleName, toBundleName string) error {
-	_, err := tx.Exec(`
-		INSERT OR IGNORE INTO successors (graph_id, from_bundle_id, to_bundle_id)
-		VALUES (?, (SELECT id FROM bundles WHERE bundle_id = ?), (SELECT id FROM bundles WHERE bundle_id = ?))`,
-		graphID, fromBundleName, toBundleName)
-	return err
 }

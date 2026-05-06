@@ -1,8 +1,9 @@
-package fbc
+package fbc_test
 
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"testing"
 	"testing/fstest"
@@ -11,17 +12,30 @@ import (
 	"github.com/stretchr/testify/require"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
+	"github.com/joelanford/library-olm/catalog/fbc"
 	"github.com/joelanford/library-olm/catalog/fbc/internal/testing/catalogfs"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
-func TestFromFS_ValidCatalog(t *testing.T) {
+func importCatalog(t *testing.T, ctx context.Context, fsys fstest.MapFS) (catalogv1.Catalog, catalogv1.Store, error) {
+	t.Helper()
+	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+
+	imp := fbc.NewImporter(fsys)
+	cat, err := store.Set(ctx, "test", catalogv1.WithURI("test://"), catalogv1.WithContent(imp, "test"))
+	require.NotNil(t, cat)
+
+	return cat, store, err
+}
+
+func TestImporter_ValidCatalog(t *testing.T) {
 	fsys := validCatalogFS()
 	ctx := context.Background()
 
-	cat, err := FromFS(ctx, fsys)
+	cat, store, err := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
 	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
 
 	t.Run("ListPackages", func(t *testing.T) {
 		var names []string
@@ -133,13 +147,13 @@ func TestFromFS_ValidCatalog(t *testing.T) {
 	})
 }
 
-func TestFromFS_SkipRange(t *testing.T) {
+func TestImporter_SkipRange(t *testing.T) {
 	fsys := skipRangeCatalogFS()
 	ctx := context.Background()
 
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
 
 	pkg, err := cat.GetPackage(ctx, "skip-operator")
 	require.NoError(t, err)
@@ -157,7 +171,7 @@ func TestFromFS_SkipRange(t *testing.T) {
 	assert.Equal(t, []string{"skip-operator.v2.0.0"}, names)
 }
 
-func TestFromFS_SkipsWithPhantomBundle(t *testing.T) {
+func TestImporter_SkipsWithPhantomBundle(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("skip-op").
 		WithChannel("skip-op", "stable",
@@ -168,9 +182,10 @@ func TestFromFS_SkipsWithPhantomBundle(t *testing.T) {
 		WithBundle("skip-op", "2.0.0").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
+
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
 
 	pkg, err := cat.GetPackage(ctx, "skip-op")
 	require.NoError(t, err)
@@ -182,7 +197,7 @@ func TestFromFS_SkipsWithPhantomBundle(t *testing.T) {
 	assert.Equal(t, []string{"skip-op.v2.0.0"}, names)
 }
 
-func TestFromFS_DanglingReplaces(t *testing.T) {
+func TestImporter_DanglingReplaces(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("repl-op").
 		WithChannel("repl-op", "stable",
@@ -191,9 +206,10 @@ func TestFromFS_DanglingReplaces(t *testing.T) {
 		WithBundle("repl-op", "1.0.0").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
+
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
 
 	pkg, err := cat.GetPackage(ctx, "repl-op")
 	require.NoError(t, err)
@@ -205,7 +221,7 @@ func TestFromFS_DanglingReplaces(t *testing.T) {
 	assert.Equal(t, []string{"repl-op.v1.0.0"}, names)
 }
 
-func TestFromFS_MultiplePackages(t *testing.T) {
+func TestImporter_MultiplePackages(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("alpha-op").
 		WithPackage("beta-op").
@@ -215,9 +231,10 @@ func TestFromFS_MultiplePackages(t *testing.T) {
 		WithBundle("beta-op", "2.0.0").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
+
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
 
 	var names []string
 	for pkg, err := range cat.ListPackages(ctx) {
@@ -238,7 +255,7 @@ func TestFromFS_MultiplePackages(t *testing.T) {
 	assert.Equal(t, []string{"beta-op.v2.0.0"}, betaNames)
 }
 
-func TestFromFS_UnknownSchemasIgnored(t *testing.T) {
+func TestImporter_UnknownSchemasIgnored(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("my-op").
 		WithCustom("my-op", "olm.custom.thing", "whatever").
@@ -246,16 +263,17 @@ func TestFromFS_UnknownSchemasIgnored(t *testing.T) {
 		WithBundle("my-op", "1.0.0").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
+
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
 
 	pkg, err := cat.GetPackage(ctx, "my-op")
 	require.NoError(t, err)
 	assert.Equal(t, "my-op", pkg.Name())
 }
 
-func TestFromFS_InvalidSkipRange(t *testing.T) {
+func TestImporter_InvalidSkipRange(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("bad-op").
 		WithChannel("bad-op", "stable",
@@ -266,16 +284,15 @@ func TestFromFS_InvalidSkipRange(t *testing.T) {
 		WithBundle("bad-op", "2.0.0").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "bad-op", "skipRange")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "bad-op", "skipRange")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_PreReleaseVersion(t *testing.T) {
+func TestImporter_PreReleaseVersion(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("pre-op").
 		WithChannel("pre-op", "stable",
@@ -286,9 +303,10 @@ func TestFromFS_PreReleaseVersion(t *testing.T) {
 		WithBundle("pre-op", "1.0.0").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
+
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
 
 	pkg, err := cat.GetPackage(ctx, "pre-op")
 	require.NoError(t, err)
@@ -313,16 +331,17 @@ func TestFromFS_PreReleaseVersion(t *testing.T) {
 	assert.Equal(t, []string{"pre-op.v1.0.0"}, names)
 }
 
-func TestFromFS_BundleWithRelease(t *testing.T) {
+func TestImporter_BundleWithRelease(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("rel-op").
 		WithChannel("rel-op", "stable", catalogfs.Entry("1.0.0")).
 		WithBundle("rel-op", "1.0.0", catalogfs.WithRelease("rc1")).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
+
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
 
 	pkg, err := cat.GetPackage(ctx, "rel-op")
 	require.NoError(t, err)
@@ -339,60 +358,58 @@ func TestFromFS_BundleWithRelease(t *testing.T) {
 	assert.Equal(t, "rc1", nvr.Release.String())
 }
 
-func TestFromFS_InvalidBundleRelease(t *testing.T) {
+func TestImporter_InvalidBundleRelease(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("bad-rel").
 		WithChannel("bad-rel", "stable", catalogfs.Entry("1.0.0")).
 		WithBundle("bad-rel", "1.0.0", catalogfs.WithRelease("rc@1")).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "bad-rel", "release")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "bad-rel", "release")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_MissingPackageProperty(t *testing.T) {
+func TestImporter_MissingPackageProperty(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("no-prop").
 		WithChannel("no-prop", "stable", catalogfs.Entry("1.0.0")).
 		WithCustom("no-prop", "olm.bundle", "no-prop.v1.0.0", "properties", []any{}).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "no-prop", "olm.package")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "no-prop", "olm.package")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_InvalidBundleVersion(t *testing.T) {
+func TestImporter_InvalidBundleVersion(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("bad-ver").
 		WithChannel("bad-ver", "stable", catalogfs.Entry("1.0.0")).
 		WithBundle("bad-ver", "not-semver", catalogfs.WithName("bad-ver.v1.0.0")).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "bad-ver", "version")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "bad-ver", "version")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_SuccessorsUnknownBundle(t *testing.T) {
+func TestImporter_SuccessorsUnknownBundle(t *testing.T) {
 	fsys := validCatalogFS()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
+
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
 
 	pkg, err := cat.GetPackage(ctx, "my-operator")
 	require.NoError(t, err)
@@ -404,27 +421,27 @@ func TestFromFS_SuccessorsUnknownBundle(t *testing.T) {
 	assert.Empty(t, names)
 }
 
-func TestFromFS_MissingBundle(t *testing.T) {
+func TestImporter_MissingBundle(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("bad-operator").
 		WithChannel("bad-operator", "stable", catalogfs.Entry("1.0.0")).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "bad-operator", "unknown bundles")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "bad-operator", "unknown bundles")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_EmptyFS(t *testing.T) {
+func TestImporter_EmptyFS(t *testing.T) {
 	fsys := catalogfs.Builder().Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
+
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
 
 	var count int
 	for _, err := range cat.ListPackages(ctx) {
@@ -434,22 +451,13 @@ func TestFromFS_EmptyFS(t *testing.T) {
 	assert.Equal(t, 0, count)
 }
 
-func TestClose(t *testing.T) {
+func TestImporter_BundleURI(t *testing.T) {
 	fsys := validCatalogFS()
 	ctx := context.Background()
 
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	require.NoError(t, cat.Close())
-}
-
-func TestFromFS_BundleURI(t *testing.T) {
-	fsys := validCatalogFS()
-	ctx := context.Background()
-
-	cat, err := FromFS(ctx, fsys)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, cat.Close()) }()
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
 
 	pkg, err := cat.GetPackage(ctx, "my-operator")
 	require.NoError(t, err)
@@ -462,67 +470,63 @@ func TestFromFS_BundleURI(t *testing.T) {
 	}
 }
 
-func TestFromFS_BundleWithoutImage(t *testing.T) {
+func TestImporter_BundleWithoutImage(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("no-img").
 		WithChannel("no-img", "stable", catalogfs.Entry("1.0.0")).
 		WithBundle("no-img", "1.0.0", catalogfs.WithImage("")).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "no-img", "no image")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "no-img", "no image")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_BundleWithInvalidImage(t *testing.T) {
+func TestImporter_BundleWithInvalidImage(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("bad-img").
 		WithChannel("bad-img", "stable", catalogfs.Entry("1.0.0")).
 		WithBundle("bad-img", "1.0.0", catalogfs.WithImage("INVALID:::ref")).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "bad-img", "parse image")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "bad-img", "parse image")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_BundleWithUntaggedImage(t *testing.T) {
+func TestImporter_BundleWithUntaggedImage(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("untag").
 		WithChannel("untag", "stable", catalogfs.Entry("1.0.0")).
 		WithBundle("untag", "1.0.0", catalogfs.WithImage("quay.io/foo/bar")).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "untag", "tagged or canonical")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "untag", "tagged or canonical")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_BundleWithUnqualifiedImage(t *testing.T) {
+func TestImporter_BundleWithUnqualifiedImage(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("short").
 		WithChannel("short", "stable", catalogfs.Entry("1.0.0")).
 		WithBundle("short", "1.0.0", catalogfs.WithImage("busybox:latest")).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "short", "parse image")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "short", "parse image")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
@@ -569,7 +573,8 @@ func skipRangeCatalogFS() fstest.MapFS {
 
 func requirePackageError(t *testing.T, err error, pkg string, msgSubstring string) {
 	t.Helper()
-	var pkgErr *PackageError
+	require.Error(t, err, "expected per-package error for %q", pkg)
+	var pkgErr *fbc.PackageError
 	found := false
 	for _, e := range err.(interface{ Unwrap() []error }).Unwrap() {
 		if errors.As(e, &pkgErr) && pkgErr.Package == pkg {
@@ -580,7 +585,7 @@ func requirePackageError(t *testing.T, err error, pkg string, msgSubstring strin
 	require.True(t, found, "expected PackageError for package %q, got: %v", pkg, err)
 }
 
-func assertEmptyCatalog(t *testing.T, ctx context.Context, cat *Catalog) {
+func assertEmptyCatalog(t *testing.T, ctx context.Context, cat catalogv1.Catalog) {
 	t.Helper()
 	var count int
 	for _, err := range cat.ListPackages(ctx) {
@@ -590,7 +595,7 @@ func assertEmptyCatalog(t *testing.T, ctx context.Context, cat *Catalog) {
 	assert.Equal(t, 0, count)
 }
 
-func TestFromFS_MixedValidAndMalformed(t *testing.T) {
+func TestImporter_MixedValidAndMalformed(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("good-op").
 		WithPackage("bad-op").
@@ -600,12 +605,11 @@ func TestFromFS_MixedValidAndMalformed(t *testing.T) {
 		WithBundle("bad-op", "not-semver", catalogfs.WithName("bad-op.v1.0.0")).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "bad-op", "version")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "bad-op", "version")
 
 	var names []string
 	for pkg, err := range cat.ListPackages(ctx) {
@@ -614,11 +618,11 @@ func TestFromFS_MixedValidAndMalformed(t *testing.T) {
 	}
 	assert.Equal(t, []string{"good-op"}, names)
 
-	_, err = cat.GetPackage(ctx, "bad-op")
+	_, err := cat.GetPackage(ctx, "bad-op")
 	require.Error(t, err)
 }
 
-func TestFromFS_AllMalformed(t *testing.T) {
+func TestImporter_AllMalformed(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("bad1").
 		WithPackage("bad2").
@@ -628,84 +632,90 @@ func TestFromFS_AllMalformed(t *testing.T) {
 		WithBundle("bad2", "1.0.0").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "bad1", "version")
-	requirePackageError(t, err, "bad2", "skipRange")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "bad1", "version")
+	requirePackageError(t, importErr, "bad2", "skipRange")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_MalformedPackageBlob(t *testing.T) {
+func TestImporter_MalformedPackageBlob(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithCustom("", "olm.package", "bad-pkg", "icon", "not-an-object").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
+
+	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	imp := fbc.NewImporter(fsys)
+	_, err = store.Set(ctx, "test", catalogv1.WithURI("test://"), catalogv1.WithContent(imp, "test"))
 	require.Error(t, err)
-	require.Nil(t, cat)
 	assert.Contains(t, err.Error(), "parse package")
 }
 
-func TestFromFS_MalformedChannelBlob(t *testing.T) {
+func TestImporter_MalformedChannelBlob(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("ch-op").
 		WithCustom("ch-op", "olm.channel", "stable", "entries", "not-an-array").
 		WithBundle("ch-op", "1.0.0").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "ch-op", "parse channel")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "ch-op", "parse channel")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_MalformedBundleBlob(t *testing.T) {
+func TestImporter_MalformedBundleBlob(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("b-op").
 		WithChannel("b-op", "stable", catalogfs.Entry("1.0.0")).
 		WithCustom("b-op", "olm.bundle", "b-op.v1.0.0", "properties", "not-an-array").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	requirePackageError(t, err, "b-op", "parse bundle")
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "b-op", "parse bundle")
 	assertEmptyCatalog(t, ctx, cat)
 }
 
-func TestFromFS_MalformedBlobEmptyPackage(t *testing.T) {
+func TestImporter_MalformedBlobEmptyPackage(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithCustom("", "olm.channel", "stable", "entries", "not-an-array").
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
+
+	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	imp := fbc.NewImporter(fsys)
+	_, err = store.Set(ctx, "test", catalogv1.WithURI("test://"), catalogv1.WithContent(imp, "test"))
 	require.Error(t, err)
-	require.Nil(t, cat)
 	assert.Contains(t, err.Error(), "parse channel")
 }
 
-func TestFromFS_PackageErrorUnwrap(t *testing.T) {
+func TestImporter_PackageErrorUnwrap(t *testing.T) {
 	fsys := catalogfs.Builder().
 		WithPackage("bad-op").
 		WithChannel("bad-op", "stable", catalogfs.Entry("1.0.0")).
 		WithBundle("bad-op", "not-semver", catalogfs.WithName("bad-op.v1.0.0")).
 		Build()
 	ctx := context.Background()
-	cat, err := FromFS(ctx, fsys)
-	require.Error(t, err)
-	require.NotNil(t, cat)
-	defer func() { require.NoError(t, cat.Close()) }()
 
-	var pkgErr *PackageError
-	require.True(t, errors.As(err, &pkgErr))
+	_, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	var pkgErr *fbc.PackageError
+	require.True(t, errors.As(importErr, &pkgErr))
 	assert.Equal(t, "bad-op", pkgErr.Package)
 	assert.NotEmpty(t, pkgErr.Errs)
 }

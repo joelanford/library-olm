@@ -9,9 +9,9 @@ import (
 )
 
 func TestDropRawTables(t *testing.T) {
-	db, tmpDir, err := OpenDB()
+	db, tmpDir, err := OpenTempDB()
 	require.NoError(t, err)
-	defer func() { require.NoError(t, CloseDB(db, tmpDir)) }()
+	defer func() { require.NoError(t, CloseTempDB(db, tmpDir)) }()
 
 	ctx := context.Background()
 

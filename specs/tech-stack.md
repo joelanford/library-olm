@@ -43,10 +43,11 @@ bundle/                          — bundle types and transformations
   registry/v1/                   — registry+v1 bundle parsing and rendering
     internal/                    — implementation details (render, validate, config)
   versionrelease.go              — version/release utilities
-catalog/                         — catalog API, formats, and querying
-  v1/                            — catalog interfaces (UpdateGraph, CompositeUpdateGraph, Catalog)
-  fbc/                           — FBC catalog implementation (public: Catalog, FromFS, Close)
-    internal/                    — SQLite schema, ingest, handler dispatch, query types
+catalog/                         — catalog API, persistent store, formats, and querying
+  v1/                            — catalog interfaces (Catalog, Store, Writer, Importer), SQLite-backed Store
+    internal/                    — content schema, metadata migrations, query types, content writer
+  fbc/                           — FBC importer (public: Importer, NewImporter)
+    internal/                    — raw table schema, ingest, handler dispatch
 image/                           — OCI registry access and content unpacking
   bundle/                        — bundle image handlers (registry+v1, Helm)
   catalog/                       — catalog image handlers (FBC)

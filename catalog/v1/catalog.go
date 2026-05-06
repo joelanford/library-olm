@@ -34,6 +34,12 @@ type CompositeUpdateGraph interface {
 // by formats with channel concepts (e.g., FBC) return CompositeUpdateGraphs
 // from these methods.
 type Catalog interface {
+	Name() string
+	URI() string
+	Digest() string
+	Priority() int
+	Labels() map[string]string
+
 	ListPackages(ctx context.Context) iter.Seq2[UpdateGraph, error]
 	GetPackage(ctx context.Context, name string) (UpdateGraph, error)
 }

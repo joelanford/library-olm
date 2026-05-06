@@ -62,6 +62,10 @@ refactor: extract webhook validation into dedicated validator
 - Overall project coverage must not decrease
 - New code must have at least 70% statement coverage
 
+## Linting
+
+- Never add `//nolint` comments to suppress linter warnings without explicit permission — fix the underlying issue instead. If fixing the warning would contradict the design or it's unclear how best to resolve it, ask the user before proceeding.
+
 ## Code Review
 
 - All changes go through PR review before merging
