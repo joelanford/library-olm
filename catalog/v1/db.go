@@ -239,32 +239,44 @@ func (d *db) List() ([]Catalog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("querying catalogs: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
 
-	var catalogs []Catalog
+	// Collect all metadata rows first, then close the cursor before
+	// querying labels. With MaxOpenConns(1), holding the cursor open
+	// while issuing another query would deadlock.
+	type catalogMeta struct {
+		name, uri, digest string
+		priority          int
+	}
+	var metas []catalogMeta
 	for rows.Next() {
-		var name, uri, digest string
-		var priority int
-		if err := rows.Scan(&name, &uri, &digest, &priority); err != nil {
+		var m catalogMeta
+		if err := rows.Scan(&m.name, &m.uri, &m.digest, &m.priority); err != nil {
+			_ = rows.Close()
 			return nil, fmt.Errorf("scanning catalog row: %w", err)
 		}
+		metas = append(metas, m)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterating catalog rows: %w", err)
+	}
+	_ = rows.Close()
 
-		labels, err := d.queryLabels(name)
+	catalogs := make([]Catalog, 0, len(metas))
+	for _, m := range metas {
+		labels, err := d.queryLabels(m.name)
 		if err != nil {
 			return nil, err
 		}
 
 		catalogs = append(catalogs, &storedCatalog{
-			name:     name,
-			uri:      uri,
-			digest:   digest,
-			priority: priority,
+			name:     m.name,
+			uri:      m.uri,
+			digest:   m.digest,
+			priority: m.priority,
 			labels:   labels,
-			query:    &internal.CatalogQuery{DB: d.sqlDB, CatalogName: name},
+			query:    &internal.CatalogQuery{DB: d.sqlDB, CatalogName: m.name},
 		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating catalog rows: %w", err)
 	}
 	return catalogs, nil
 }
