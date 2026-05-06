@@ -20,11 +20,11 @@ func (h *OLMPackageHandler) Schema() string { return declcfg.SchemaPackage }
 
 // validatedBundle holds bundle data that has passed validation and is ready to write.
 type validatedBundle struct {
-	name       string
-	pkg        string
-	version    string
-	release    string
-	uri        string
+	name    string
+	pkg     string
+	version string
+	release string
+	uri     string
 }
 
 func (h *OLMPackageHandler) Normalize(ctx context.Context, rawDB *sql.DB, w catalogv1.Writer, packageName string) error {

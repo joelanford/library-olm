@@ -7,10 +7,10 @@ import (
 	"iter"
 	"maps"
 
+	_ "modernc.org/sqlite"
+
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	"github.com/joelanford/library-olm/catalog/v1/internal"
-
-	_ "modernc.org/sqlite"
 )
 
 type db struct {
@@ -306,10 +306,10 @@ type storedCatalog struct {
 	query    *internal.CatalogQuery
 }
 
-func (c *storedCatalog) Name() string            { return c.name }
-func (c *storedCatalog) URI() string              { return c.uri }
-func (c *storedCatalog) Digest() string           { return c.digest }
-func (c *storedCatalog) Priority() int            { return c.priority }
+func (c *storedCatalog) Name() string              { return c.name }
+func (c *storedCatalog) URI() string               { return c.uri }
+func (c *storedCatalog) Digest() string            { return c.digest }
+func (c *storedCatalog) Priority() int             { return c.priority }
 func (c *storedCatalog) Labels() map[string]string { return maps.Clone(c.labels) }
 
 func (c *storedCatalog) ListPackages(ctx context.Context) iter.Seq2[UpdateGraph, error] {

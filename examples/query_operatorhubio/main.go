@@ -63,23 +63,21 @@ func run() error {
 	}
 	defer func() { _ = store.Close() }()
 
-	imp := fbc.NewImporter(os.DirFS(catalogDir))
 	cat, err := store.Set(ctx, "operatorhubio",
 		catalogv1.WithURI(catalogImage),
-		catalogv1.WithContent(imp, catalogDigest),
+		catalogv1.WithContent(fbc.NewImporter(os.DirFS(catalogDir)), catalogDigest),
 	)
 	if err != nil {
-		return fmt.Errorf("import catalog: %w", err)
-	}
-	if pkgErrors := imp.PackageErrors(); pkgErrors != nil {
 		var pkgErr *fbc.PackageError
+		if !errors.As(err, &pkgErr) {
+			return fmt.Errorf("import catalog: %w", err)
+		}
 		for _, e := range err.(interface{ Unwrap() []error }).Unwrap() {
 			if errors.As(e, &pkgErr) {
 				log.Printf("WARNING: %v", pkgErr)
 			}
 		}
 	}
-	defer func() { _ = cat.Close() }()
 	log.Printf("Loaded catalog in %s", time.Since(start))
 
 	// Step 3: Exercise the full API surface
@@ -228,7 +226,7 @@ func run() error {
 	return nil
 }
 
-func findInterestingPackage(ctx context.Context, cat *fbc.Catalog, pkgNames []string) (string, error) {
+func findInterestingPackage(ctx context.Context, cat catalogv1.Catalog, pkgNames []string) (string, error) {
 	log.Println("Scanning packages to find one with multiple channels and many bundles...")
 	start := time.Now()
 

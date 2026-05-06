@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing/fstest"
 
@@ -11,7 +13,7 @@ import (
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
-func ExampleFromFS() {
+func ExampleNewImporter() {
 	// Build an FBC catalog in memory using NDJSON.
 	fsys := fstest.MapFS{
 		"catalog.json": &fstest.MapFile{Data: []byte(
@@ -25,15 +27,29 @@ func ExampleFromFS() {
 	}
 
 	ctx := context.Background()
-	cat, err := fbc.FromFS(ctx, fsys)
+
+	// Open a persistent store (use a temp file for the example).
+	dbPath := filepath.Join(os.TempDir(), "example-catalog.db")
+	defer func() { _ = os.Remove(dbPath) }()
+
+	store, err := catalogv1.OpenStore(dbPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		if err := cat.Close(); err != nil {
+		if err := store.Close(); err != nil {
 			log.Fatal(err)
 		}
 	}()
+
+	// Import FBC content into the store.
+	cat, err := store.Set(ctx, "my-catalog",
+		catalogv1.WithURI("test://example"),
+		catalogv1.WithContent(fbc.NewImporter(fsys), "example-digest"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// List packages.
 	for pkg, err := range cat.ListPackages(ctx) {

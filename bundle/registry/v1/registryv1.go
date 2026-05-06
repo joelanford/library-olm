@@ -67,5 +67,4 @@ var (
 
 	// WithDeploymentConfig sets deployment customizations to apply to CSV deployments.
 	WithDeploymentConfig = render.WithDeploymentConfig
-
 )
