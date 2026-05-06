@@ -48,19 +48,30 @@ func run() error {
 	}
 	log.Printf("Extracting %s to %s", catalogImage, catalogDir)
 	start := time.Now()
-	if err := unpackImage(ctx, catalogImage, &imgcatalog.FBCHandler{}, catalogDir); err != nil {
+	catalogDigest, err := unpackImage(ctx, catalogImage, &imgcatalog.FBCHandler{}, catalogDir)
+	if err != nil {
 		return fmt.Errorf("extract catalog image: %w", err)
 	}
-	log.Printf("Extracted catalog image in %s", time.Since(start))
+	log.Printf("Extracted catalog image in %s (digest: %s)", time.Since(start), catalogDigest)
 
 	// Step 2: Open the extracted catalog as an FBC Catalog
 	log.Println("Loading catalog from filesystem into SQLite...")
 	start = time.Now()
-	cat, err := fbc.FromFS(ctx, os.DirFS(catalogDir))
+	store, err := catalogv1.OpenStore(filepath.Join(tmpDir, "catalog.db"))
 	if err != nil {
-		if cat == nil {
-			return fmt.Errorf("load catalog: %w", err)
-		}
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	imp := fbc.NewImporter(os.DirFS(catalogDir))
+	cat, err := store.Set(ctx, "operatorhubio",
+		catalogv1.WithURI(catalogImage),
+		catalogv1.WithContent(imp, catalogDigest),
+	)
+	if err != nil {
+		return fmt.Errorf("import catalog: %w", err)
+	}
+	if pkgErrors := imp.PackageErrors(); pkgErrors != nil {
 		var pkgErr *fbc.PackageError
 		for _, e := range err.(interface{ Unwrap() []error }).Unwrap() {
 			if errors.As(e, &pkgErr) {
@@ -279,7 +290,7 @@ func unpackAndRenderBundle(ctx context.Context, composite catalogv1.CompositeUpd
 		return fmt.Errorf("create bundle dir: %w", err)
 	}
 	start := time.Now()
-	if err := unpackImage(ctx, bundle.URI(), &imgbundle.RegistryV1Handler{}, bundleDir); err != nil {
+	if _, err := unpackImage(ctx, bundle.URI(), &imgbundle.RegistryV1Handler{}, bundleDir); err != nil {
 		return fmt.Errorf("unpack bundle image: %w", err)
 	}
 	log.Printf("Unpacked bundle in %s", time.Since(start))
@@ -301,38 +312,38 @@ func unpackAndRenderBundle(ctx context.Context, composite catalogv1.CompositeUpd
 	return nil
 }
 
-func unpackImage(ctx context.Context, uri string, handler image.Handler, dest string) error {
+func unpackImage(ctx context.Context, uri string, handler image.Handler, dest string) (string, error) {
 	if !strings.HasPrefix(uri, dockerScheme) {
-		return fmt.Errorf("unsupported URI scheme in %q (expected %s)", uri, dockerScheme)
+		return "", fmt.Errorf("unsupported URI scheme in %q (expected %s)", uri, dockerScheme)
 	}
 	imgRef, err := docker.ParseReference("//" + strings.TrimPrefix(uri, dockerScheme))
 	if err != nil {
-		return fmt.Errorf("parse reference %q: %w", uri, err)
+		return "", fmt.Errorf("parse reference %q: %w", uri, err)
 	}
 
 	client, err := image.NewContainersImageRepository(ctx, imgRef, &types.SystemContext{})
 	if err != nil {
-		return fmt.Errorf("create client: %w", err)
+		return "", fmt.Errorf("create client: %w", err)
 	}
 	defer func() { _ = client.Close() }()
 
 	desc, err := client.Resolve(ctx)
 	if err != nil {
-		return fmt.Errorf("resolve: %w", err)
+		return "", fmt.Errorf("resolve: %w", err)
 	}
 
 	manifestBytes, _, err := client.FetchManifest(ctx, desc)
 	if err != nil {
-		return fmt.Errorf("fetch manifest: %w", err)
+		return "", fmt.Errorf("fetch manifest: %w", err)
 	}
 
 	matches, err := handler.Matches(ctx, client, desc, manifestBytes)
 	if err != nil {
-		return fmt.Errorf("matches: %w", err)
+		return "", fmt.Errorf("matches: %w", err)
 	}
 	if !matches {
-		return fmt.Errorf("image %q does not match handler %q", uri, handler.Name())
+		return "", fmt.Errorf("image %q does not match handler %q", uri, handler.Name())
 	}
 
-	return handler.Unpack(ctx, client, desc, manifestBytes, dest)
+	return desc.Digest.String(), handler.Unpack(ctx, client, desc, manifestBytes, dest)
 }
