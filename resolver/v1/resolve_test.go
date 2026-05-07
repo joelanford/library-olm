@@ -3,6 +3,7 @@ package resolverv1_test
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	mmsemver "github.com/Masterminds/semver/v3"
@@ -68,40 +69,39 @@ func (g *graphImporter) Import(_ context.Context, w catalogv1.Writer) error {
 			return err
 		}
 	}
-	pkgGraph, err := w.CreateGraph(g.pkg, nil)
-	if err != nil {
+	if err := w.CreateGraph([]string{g.pkg}); err != nil {
 		return err
 	}
 	for _, sg := range g.subGraphs {
-		if err := buildSubGraph(w, g.pkg, pkgGraph, sg); err != nil {
+		if err := buildSubGraph(w, g.pkg, []string{g.pkg}, sg); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func buildSubGraph(w catalogv1.Writer, pkg string, parent catalogv1.GraphID, sg graphOption) error {
-	id, err := w.CreateGraph(sg.name, &parent)
-	if err != nil {
+func buildSubGraph(w catalogv1.Writer, pkg string, parentPath []string, sg graphOption) error {
+	path := append(slices.Clone(parentPath), sg.name)
+	if err := w.CreateGraph(path); err != nil {
 		return err
 	}
 	for _, v := range sg.bundles {
-		if err := w.AddBundleToGraph(id, pkg+".v"+v); err != nil {
+		if err := w.AddBundleToGraph(path, pkg+".v"+v); err != nil {
 			return err
 		}
 	}
 	for _, e := range sg.edges {
-		if err := w.AddEdge(id, pkg+".v"+e.from, pkg+".v"+e.to); err != nil {
+		if err := w.AddEdge(path, pkg+".v"+e.from, pkg+".v"+e.to); err != nil {
 			return err
 		}
 	}
 	for _, r := range sg.ranges {
-		if err := w.AddPredecessorRange(id, pkg+".v"+r.bundle, r.versionRange); err != nil {
+		if err := w.AddPredecessorRange(path, pkg+".v"+r.bundle, r.versionRange); err != nil {
 			return err
 		}
 	}
 	for _, child := range sg.children {
-		if err := buildSubGraph(w, pkg, id, child); err != nil {
+		if err := buildSubGraph(w, pkg, path, child); err != nil {
 			return err
 		}
 	}

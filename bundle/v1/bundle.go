@@ -1,6 +1,8 @@
 package bundlev1
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 
 	bsemver "github.com/blang/semver/v4"
@@ -21,6 +23,7 @@ type BundleIdentity interface {
 type Bundle interface {
 	BundleIdentity
 	URI() string
+	Property(ctx context.Context, key string) (json.RawMessage, error)
 }
 
 // NameVersionRelease is a bundle identity: package name + version + release.

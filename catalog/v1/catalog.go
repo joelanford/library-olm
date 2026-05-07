@@ -2,6 +2,7 @@ package catalogv1
 
 import (
 	"context"
+	"encoding/json"
 	"iter"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
@@ -14,6 +15,7 @@ type UpdateGraph interface {
 	Name() string
 	ListBundles(ctx context.Context) iter.Seq2[bundlev1.Bundle, error]
 	Successors(ctx context.Context, from bundlev1.BundleIdentity) iter.Seq2[bundlev1.Bundle, error]
+	Property(ctx context.Context, key string) (json.RawMessage, error)
 }
 
 // CompositeUpdateGraph is an UpdateGraph composed of named child UpdateGraphs.

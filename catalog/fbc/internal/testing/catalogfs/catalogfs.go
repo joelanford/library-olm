@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing/fstest"
+
+	"github.com/operator-framework/operator-registry/alpha/declcfg"
 )
 
 // CatalogFSBuilder constructs an FBC catalog filesystem.
@@ -11,6 +13,7 @@ type CatalogFSBuilder interface {
 	WithPackage(name string) CatalogFSBuilder
 	WithChannel(pkg, name string, entries ...ChannelEntry) CatalogFSBuilder
 	WithBundle(pkg, version string, opts ...BundleOption) CatalogFSBuilder
+	WithDeprecation(pkg string, entries ...declcfg.DeprecationEntry) CatalogFSBuilder
 	WithCustom(pkg, schema, name string, fieldKVs ...any) CatalogFSBuilder
 	Build() fstest.MapFS
 }
@@ -21,10 +24,11 @@ func Builder() CatalogFSBuilder {
 }
 
 type builder struct {
-	packages []packageBlob
-	channels []channelBlob
-	bundles  []bundleBlob
-	customs  []customBlob
+	packages     []packageBlob
+	channels     []channelBlob
+	bundles      []bundleBlob
+	deprecations []declcfg.Deprecation
+	customs      []customBlob
 }
 
 type customBlob struct {
@@ -60,6 +64,15 @@ func (b *builder) WithPackage(name string) CatalogFSBuilder {
 
 func (b *builder) WithChannel(pkg, name string, entries ...ChannelEntry) CatalogFSBuilder {
 	b.channels = append(b.channels, channelBlob{pkg: pkg, name: name, entries: entries})
+	return b
+}
+
+func (b *builder) WithDeprecation(pkg string, entries ...declcfg.DeprecationEntry) CatalogFSBuilder {
+	b.deprecations = append(b.deprecations, declcfg.Deprecation{
+		Schema:  declcfg.SchemaDeprecation,
+		Package: pkg,
+		Entries: entries,
+	})
 	return b
 }
 
@@ -143,6 +156,10 @@ func (b *builder) Build() fstest.MapFS {
 				Value: prop,
 			}},
 		}))
+	}
+	for _, d := range b.deprecations {
+		path := fmt.Sprintf("%s/olm.deprecations.json", d.Package)
+		addBlob(path, mustMarshal(d))
 	}
 	for _, c := range b.customs {
 		blob := map[string]any{
@@ -286,4 +303,28 @@ type fbcPackagePropertyValue struct {
 	PackageName string `json:"packageName"`
 	Version     string `json:"version"`
 	Release     string `json:"release,omitempty"`
+}
+
+// PackageDeprecation creates a package-level deprecation entry.
+func PackageDeprecation(message string) declcfg.DeprecationEntry {
+	return declcfg.DeprecationEntry{
+		Reference: declcfg.PackageScopedReference{Schema: declcfg.SchemaPackage},
+		Message:   message,
+	}
+}
+
+// ChannelDeprecation creates a channel-level deprecation entry.
+func ChannelDeprecation(name, message string) declcfg.DeprecationEntry {
+	return declcfg.DeprecationEntry{
+		Reference: declcfg.PackageScopedReference{Schema: declcfg.SchemaChannel, Name: name},
+		Message:   message,
+	}
+}
+
+// BundleDeprecation creates a bundle-level deprecation entry.
+func BundleDeprecation(name, message string) declcfg.DeprecationEntry {
+	return declcfg.DeprecationEntry{
+		Reference: declcfg.PackageScopedReference{Schema: declcfg.SchemaBundle, Name: name},
+		Message:   message,
+	}
 }

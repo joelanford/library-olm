@@ -60,6 +60,8 @@ const (
 	TableRawChannel      = "raw_olm_channel"
 	TableRawChannelEntry = "raw_olm_channel_entry"
 	TableRawBundle       = "raw_olm_bundle"
+	TableRawDeprecation  = "raw_olm_deprecation"
+	TableRawOther        = "raw_other"
 )
 
 var RawTables = []string{
@@ -67,6 +69,8 @@ var RawTables = []string{
 	TableRawChannel,
 	TableRawChannelEntry,
 	TableRawBundle,
+	TableRawDeprecation,
+	TableRawOther,
 }
 
 var rawSchemaSQL = `
@@ -74,12 +78,14 @@ var rawSchemaSQL = `
 -- Table names derived from FBC schema strings: replace "." with "_", prefix "raw_"
 
 CREATE TABLE ` + TableRawPackage + ` (
-    package_name TEXT NOT NULL PRIMARY KEY
+    package_name TEXT NOT NULL PRIMARY KEY,
+    ext_data     JSON
 );
 
 CREATE TABLE ` + TableRawChannel + ` (
     name         TEXT NOT NULL,
     package_name TEXT NOT NULL,
+    ext_data     JSON,
     PRIMARY KEY (package_name, name)
 );
 
@@ -99,6 +105,19 @@ CREATE TABLE ` + TableRawBundle + ` (
     version      TEXT NOT NULL,
     release      TEXT NOT NULL DEFAULT '',
     image        TEXT NOT NULL DEFAULT '',
+    ext_data     JSON,
     PRIMARY KEY (package_name, name)
+);
+
+CREATE TABLE ` + TableRawDeprecation + ` (
+    package_name TEXT NOT NULL,
+    ext_data     JSON
+);
+
+CREATE TABLE ` + TableRawOther + ` (
+    schema       TEXT NOT NULL,
+    package_name TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    ext_data     JSON
 );
 `

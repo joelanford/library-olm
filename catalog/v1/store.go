@@ -8,16 +8,15 @@ import (
 
 const labelCatalogName = "olm.operatorframework.io/metadata.name"
 
-// GraphID is the database identifier for a graph node.
-type GraphID int64
-
 // Writer provides methods for inserting catalog content into a store.
 type Writer interface {
 	InsertBundle(id, pkg, version, release, uri string) error
-	CreateGraph(name string, parent *GraphID) (GraphID, error)
-	AddBundleToGraph(graph GraphID, bundleID string) error
-	AddEdge(graph GraphID, fromBundleID, toBundleID string) error
-	AddPredecessorRange(graph GraphID, bundleID, versionRange string) error
+	CreateGraph(path []string) error
+	AddBundleToGraph(path []string, bundleID string) error
+	AddEdge(path []string, fromBundleID, toBundleID string) error
+	AddPredecessorRange(path []string, bundleID, versionRange string) error
+	SetBundleProperty(bundleID, key string, val any) error
+	SetGraphProperty(path []string, key string, val any) error
 }
 
 // Importer defines how catalog content is imported into a store via a Writer.

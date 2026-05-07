@@ -35,15 +35,13 @@ func simpleImporter(pkg, version, channel string) catalogv1.Importer {
 		if err := w.InsertBundle(bundleID, pkg, version, "", "docker://example.com/"+pkg+":v"+version); err != nil {
 			return err
 		}
-		pkgGraph, err := w.CreateGraph(pkg, nil)
-		if err != nil {
+		if err := w.CreateGraph([]string{pkg}); err != nil {
 			return err
 		}
-		chGraph, err := w.CreateGraph(channel, &pkgGraph)
-		if err != nil {
+		if err := w.CreateGraph([]string{pkg, channel}); err != nil {
 			return err
 		}
-		return w.AddBundleToGraph(chGraph, bundleID)
+		return w.AddBundleToGraph([]string{pkg, channel}, bundleID)
 	}}
 }
 
@@ -514,24 +512,23 @@ func rangeImporter(versionRange string) catalogv1.Importer {
 		if err := w.InsertBundle("pkg.v3.0.0", "pkg", "3.0.0", "", "docker://example.com/pkg:v3.0.0"); err != nil {
 			return err
 		}
-		pkgGraph, err := w.CreateGraph("pkg", nil)
-		if err != nil {
+		if err := w.CreateGraph([]string{"pkg"}); err != nil {
 			return err
 		}
-		chGraph, err := w.CreateGraph("stable", &pkgGraph)
-		if err != nil {
+		chPath := []string{"pkg", "stable"}
+		if err := w.CreateGraph(chPath); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(chGraph, "pkg.v1.0.0"); err != nil {
+		if err := w.AddBundleToGraph(chPath, "pkg.v1.0.0"); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(chGraph, "pkg.v2.0.0"); err != nil {
+		if err := w.AddBundleToGraph(chPath, "pkg.v2.0.0"); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(chGraph, "pkg.v3.0.0"); err != nil {
+		if err := w.AddBundleToGraph(chPath, "pkg.v3.0.0"); err != nil {
 			return err
 		}
-		return w.AddPredecessorRange(chGraph, "pkg.v2.0.0", versionRange)
+		return w.AddPredecessorRange(chPath, "pkg.v2.0.0", versionRange)
 	}}
 }
 
@@ -602,31 +599,29 @@ func TestSuccessors_ExplicitAndRange_Union(t *testing.T) {
 		if err := w.InsertBundle("pkg.v3.0.0", "pkg", "3.0.0", "", "docker://example.com/pkg:v3"); err != nil {
 			return err
 		}
-		pkgGraph, err := w.CreateGraph("pkg", nil)
-		if err != nil {
+		if err := w.CreateGraph([]string{"pkg"}); err != nil {
 			return err
 		}
-		chGraph, err := w.CreateGraph("stable", &pkgGraph)
-		if err != nil {
+		chPath := []string{"pkg", "stable"}
+		if err := w.CreateGraph(chPath); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(chGraph, "pkg.v1.0.0"); err != nil {
+		if err := w.AddBundleToGraph(chPath, "pkg.v1.0.0"); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(chGraph, "pkg.v2.0.0"); err != nil {
+		if err := w.AddBundleToGraph(chPath, "pkg.v2.0.0"); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(chGraph, "pkg.v3.0.0"); err != nil {
+		if err := w.AddBundleToGraph(chPath, "pkg.v3.0.0"); err != nil {
 			return err
 		}
-		if err := w.AddEdge(chGraph, "pkg.v1.0.0", "pkg.v2.0.0"); err != nil {
+		if err := w.AddEdge(chPath, "pkg.v1.0.0", "pkg.v2.0.0"); err != nil {
 			return err
 		}
-		// v2.0.0 is reachable via explicit edge; v3.0.0 via range
-		if err := w.AddPredecessorRange(chGraph, "pkg.v2.0.0", ">=1.0.0 <2.0.0"); err != nil {
+		if err := w.AddPredecessorRange(chPath, "pkg.v2.0.0", ">=1.0.0 <2.0.0"); err != nil {
 			return err
 		}
-		return w.AddPredecessorRange(chGraph, "pkg.v3.0.0", ">=1.0.0 <3.0.0")
+		return w.AddPredecessorRange(chPath, "pkg.v3.0.0", ">=1.0.0 <3.0.0")
 	}}
 	cat, err := store.Set(ctx, "cat",
 		catalogv1.WithURI("test://"),
@@ -654,18 +649,17 @@ func TestSuccessors_ZeroVersion(t *testing.T) {
 		if err := w.InsertBundle("pkg.v1.0.0", "pkg", "1.0.0", "", "docker://example.com/pkg:v1"); err != nil {
 			return err
 		}
-		pkgGraph, err := w.CreateGraph("pkg", nil)
-		if err != nil {
+		if err := w.CreateGraph([]string{"pkg"}); err != nil {
 			return err
 		}
-		chGraph, err := w.CreateGraph("stable", &pkgGraph)
-		if err != nil {
+		chPath := []string{"pkg", "stable"}
+		if err := w.CreateGraph(chPath); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(chGraph, "pkg.v1.0.0"); err != nil {
+		if err := w.AddBundleToGraph(chPath, "pkg.v1.0.0"); err != nil {
 			return err
 		}
-		return w.AddPredecessorRange(chGraph, "pkg.v1.0.0", ">=0.0.0")
+		return w.AddPredecessorRange(chPath, "pkg.v1.0.0", ">=0.0.0")
 	}}
 	cat, err := store.Set(ctx, "cat",
 		catalogv1.WithURI("test://"),
@@ -743,26 +737,25 @@ func TestSuccessors_MixedExplicitAndRanges(t *testing.T) {
 				return err
 			}
 		}
-		pkgGraph, err := w.CreateGraph("pkg", nil)
-		if err != nil {
+		if err := w.CreateGraph([]string{"pkg"}); err != nil {
 			return err
 		}
-		chGraph, err := w.CreateGraph("stable", &pkgGraph)
-		if err != nil {
+		chPath := []string{"pkg", "stable"}
+		if err := w.CreateGraph(chPath); err != nil {
 			return err
 		}
 		for _, v := range []string{"1.0.0", "1.1.0", "2.0.0", "3.0.0"} {
-			if err := w.AddBundleToGraph(chGraph, "pkg.v"+v); err != nil {
+			if err := w.AddBundleToGraph(chPath, "pkg.v"+v); err != nil {
 				return err
 			}
 		}
-		if err := w.AddEdge(chGraph, "pkg.v1.0.0", "pkg.v1.1.0"); err != nil {
+		if err := w.AddEdge(chPath, "pkg.v1.0.0", "pkg.v1.1.0"); err != nil {
 			return err
 		}
-		if err := w.AddPredecessorRange(chGraph, "pkg.v2.0.0", ">=1.0.0"); err != nil {
+		if err := w.AddPredecessorRange(chPath, "pkg.v2.0.0", ">=1.0.0"); err != nil {
 			return err
 		}
-		return w.AddPredecessorRange(chGraph, "pkg.v3.0.0", ">=1.0.0")
+		return w.AddPredecessorRange(chPath, "pkg.v3.0.0", ">=1.0.0")
 	}}
 	cat, err := store.Set(ctx, "cat",
 		catalogv1.WithURI("test://"),
@@ -794,34 +787,33 @@ func TestSuccessors_CompositeGraph_Ranges(t *testing.T) {
 		if err := w.InsertBundle("pkg.v2.0.0", "pkg", "2.0.0", "", "docker://example.com/pkg:v2"); err != nil {
 			return err
 		}
-		pkgGraph, err := w.CreateGraph("pkg", nil)
-		if err != nil {
+		if err := w.CreateGraph([]string{"pkg"}); err != nil {
 			return err
 		}
-		ch1, err := w.CreateGraph("stable", &pkgGraph)
-		if err != nil {
+		ch1Path := []string{"pkg", "stable"}
+		if err := w.CreateGraph(ch1Path); err != nil {
 			return err
 		}
-		ch2, err := w.CreateGraph("fast", &pkgGraph)
-		if err != nil {
+		ch2Path := []string{"pkg", "fast"}
+		if err := w.CreateGraph(ch2Path); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(ch1, "pkg.v1.0.0"); err != nil {
+		if err := w.AddBundleToGraph(ch1Path, "pkg.v1.0.0"); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(ch1, "pkg.v2.0.0"); err != nil {
+		if err := w.AddBundleToGraph(ch1Path, "pkg.v2.0.0"); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(ch2, "pkg.v1.0.0"); err != nil {
+		if err := w.AddBundleToGraph(ch2Path, "pkg.v1.0.0"); err != nil {
 			return err
 		}
-		if err := w.AddBundleToGraph(ch2, "pkg.v2.0.0"); err != nil {
+		if err := w.AddBundleToGraph(ch2Path, "pkg.v2.0.0"); err != nil {
 			return err
 		}
-		if err := w.AddPredecessorRange(ch1, "pkg.v2.0.0", ">=1.0.0"); err != nil {
+		if err := w.AddPredecessorRange(ch1Path, "pkg.v2.0.0", ">=1.0.0"); err != nil {
 			return err
 		}
-		return w.AddPredecessorRange(ch2, "pkg.v2.0.0", ">=1.0.0")
+		return w.AddPredecessorRange(ch2Path, "pkg.v2.0.0", ">=1.0.0")
 	}}
 	cat, err := store.Set(ctx, "cat",
 		catalogv1.WithURI("test://"),

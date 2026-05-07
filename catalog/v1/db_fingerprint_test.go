@@ -23,7 +23,7 @@ import (
 // produced by the FBC fixture below. When the content schema or FBC import
 // logic changes, this test will fail. Update ContentSchemaVersion in
 // catalog/v1/internal/content.go and refresh this constant.
-const expectedFingerprint = "ee37160df648464f4984019351a62179191f1063a379f131ffb7ba66378c7fbd"
+const expectedFingerprint = "9b9ad6a9007fc28657a4062ced5aed62667aa2567733e70ba80ddfcfcff3ae0d"
 
 func TestContentFingerprint(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "fp.db")
@@ -54,13 +54,17 @@ func TestContentFingerprint(t *testing.T) {
 	dumpTable(t, rawDB, &buf, "content_bundles",
 		"SELECT catalog_name, bundle_id, package_name, version, release, uri FROM content_bundles ORDER BY catalog_name, bundle_id")
 	dumpTable(t, rawDB, &buf, "content_graphs",
-		"SELECT catalog_name, name, parent_id FROM content_graphs ORDER BY catalog_name, id")
+		"SELECT catalog_name, name, path, parent_id FROM content_graphs ORDER BY catalog_name, id")
 	dumpTable(t, rawDB, &buf, "content_graph_bundles",
 		"SELECT graph_id, bundle_id FROM content_graph_bundles ORDER BY graph_id, bundle_id")
 	dumpTable(t, rawDB, &buf, "content_successors",
 		"SELECT graph_id, from_bundle_id, to_bundle_id FROM content_successors ORDER BY graph_id, from_bundle_id, to_bundle_id")
 	dumpTable(t, rawDB, &buf, "content_predecessor_ranges",
 		"SELECT graph_id, bundle_id, version_range FROM content_predecessor_ranges ORDER BY graph_id, bundle_id")
+	dumpTable(t, rawDB, &buf, "content_bundle_properties",
+		"SELECT catalog_name, bundle_id, key, value FROM content_bundle_properties ORDER BY catalog_name, bundle_id, key")
+	dumpTable(t, rawDB, &buf, "content_graph_properties",
+		"SELECT graph_id, key, value FROM content_graph_properties ORDER BY graph_id, key")
 
 	hash := sha256.Sum256([]byte(buf.String()))
 	got := hex.EncodeToString(hash[:])

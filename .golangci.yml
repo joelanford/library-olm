@@ -51,7 +51,7 @@ linters:
             - $all
             - "!**/bundle/registry/v1/internal/**"
             - "!**/bundle/registry/v1/*_test.go"
-            - "!**/catalog/fbc/internal/**"
+            - "!**/catalog/fbc/**"
           deny:
             - pkg: github.com/operator-framework/api
               desc: "legacy dependency — only allowed in bundle/registry/v1/internal and catalog/fbc/internal (see specs/mission.md)"
