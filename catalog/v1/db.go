@@ -7,7 +7,7 @@ import (
 	"iter"
 	"maps"
 
-	bsemver "github.com/blang/semver/v4"
+	"k8s.io/apimachinery/pkg/labels"
 	_ "modernc.org/sqlite"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
@@ -362,8 +362,8 @@ func (w *compositeUpdateGraphWrapper) ListBundles(ctx context.Context) iter.Seq2
 	return w.q.ListBundles(ctx)
 }
 
-func (w *compositeUpdateGraphWrapper) Successors(ctx context.Context, fromID bundlev1.BundleID, fromVersion bsemver.Version) iter.Seq2[bundlev1.Bundle, error] {
-	return w.q.Successors(ctx, fromID, fromVersion)
+func (w *compositeUpdateGraphWrapper) Successors(ctx context.Context, from bundlev1.BundleIdentity) iter.Seq2[bundlev1.Bundle, error] {
+	return w.q.Successors(ctx, from)
 }
 
 func (w *compositeUpdateGraphWrapper) ListGraphs(ctx context.Context) iter.Seq2[UpdateGraph, error] {
@@ -383,7 +383,60 @@ func (w *compositeUpdateGraphWrapper) ListGraphs(ctx context.Context) iter.Seq2[
 }
 
 func (w *compositeUpdateGraphWrapper) GetGraph(ctx context.Context, name string) (UpdateGraph, error) {
-	return w.q.GetGraph(ctx, name)
+	id, hasChildren, err := w.q.GetGraph(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if hasChildren {
+		return &compositeUpdateGraphWrapper{
+			q: &internal.CompositeUpdateGraphQuery{DB: w.q.DB, GraphID: id, GraphName: name},
+		}, nil
+	}
+	return &internal.UpdateGraphQuery{DB: w.q.DB, GraphID: id, GraphName: name}, nil
+}
+
+func (d *db) Select(selector labels.Selector) StoreReader {
+	return &selectedStore{db: d, selector: selector}
+}
+
+// selectedStore is a read-only view of a db filtered by label selector.
+type selectedStore struct {
+	db       *db
+	selector labels.Selector
+}
+
+func (s *selectedStore) Get(name string) (Catalog, error) {
+	cat, err := s.db.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	if !s.selector.Matches(labels.Set(cat.Labels())) {
+		return nil, fmt.Errorf("catalog %q not found", name)
+	}
+	return cat, nil
+}
+
+func (s *selectedStore) List() ([]Catalog, error) {
+	all, err := s.db.List()
+	if err != nil {
+		return nil, err
+	}
+	var filtered []Catalog
+	for _, cat := range all {
+		if s.selector.Matches(labels.Set(cat.Labels())) {
+			filtered = append(filtered, cat)
+		}
+	}
+	return filtered, nil
+}
+
+func (s *selectedStore) Select(selector labels.Selector) StoreReader {
+	return &selectedStore{db: s.db, selector: andSelector(s.selector, selector)}
+}
+
+func andSelector(a, b labels.Selector) labels.Selector {
+	reqs, _ := b.Requirements()
+	return a.Add(reqs...)
 }
 
 // writerAdapter adapts the internal ContentWriter to the catalogv1.Writer interface.
@@ -422,6 +475,7 @@ func (w *writerAdapter) AddPredecessorRange(graph GraphID, bundleID, versionRang
 
 // Compile-time interface checks.
 var _ Store = (*db)(nil)
+var _ StoreReader = (*selectedStore)(nil)
 var _ Catalog = (*storedCatalog)(nil)
 var _ CompositeUpdateGraph = (*compositeUpdateGraphWrapper)(nil)
 var _ UpdateGraph = (*internal.UpdateGraphQuery)(nil)

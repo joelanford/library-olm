@@ -9,8 +9,7 @@ import (
 	"slices"
 	"testing/fstest"
 
-	bsemver "github.com/blang/semver/v4"
-
+	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	"github.com/joelanford/library-olm/catalog/fbc"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
@@ -107,12 +106,13 @@ func ExampleNewImporter() {
 	fmt.Println("stable bundles:", stableBundles)
 
 	// Find successors (upgrade targets) from v1.0.0 in the stable channel.
-	fromVersion, err := bsemver.Parse("1.0.0")
+	// Look up the installed bundle in the graph to get a BundleIdentity.
+	installed, err := findBundle(stable.ListBundles(ctx), "my-operator.v1.0.0")
 	if err != nil {
 		log.Fatal(err)
 	}
 	var successors []string
-	for b, err := range stable.Successors(ctx, "my-operator.v1.0.0", fromVersion) {
+	for b, err := range stable.Successors(ctx, installed) {
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -126,4 +126,16 @@ func ExampleNewImporter() {
 	// all bundles: [my-operator.v1.0.0 my-operator.v1.1.0 my-operator.v1.2.0]
 	// stable bundles: [my-operator.v1.0.0 (1.0.0) my-operator.v1.1.0 (1.1.0)]
 	// successors of v1.0.0 in stable: [my-operator.v1.1.0]
+}
+
+func findBundle(seq func(func(bundlev1.Bundle, error) bool), id string) (bundlev1.Bundle, error) {
+	for b, err := range seq {
+		if err != nil {
+			return nil, err
+		}
+		if string(b.ID()) == id {
+			return b, nil
+		}
+	}
+	return nil, fmt.Errorf("bundle %q not found", id)
 }

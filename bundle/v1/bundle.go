@@ -9,12 +9,17 @@ import (
 // BundleID is the unique identifier for a bundle within a catalog.
 type BundleID string
 
+// BundleIdentity identifies a bundle by its ID and name/version/release.
+type BundleIdentity interface {
+	ID() BundleID
+	NameVersionRelease() NameVersionRelease
+}
+
 // Bundle represents a versioned unit of content in a catalog.
 // Different catalog formats (registry+v1, Helm, registry+v2) provide
 // their own implementations.
 type Bundle interface {
-	ID() BundleID
-	NameVersionRelease() NameVersionRelease
+	BundleIdentity
 	URI() string
 }
 

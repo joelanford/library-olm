@@ -54,6 +54,10 @@ image/                           — OCI registry access and content unpacking
   internal/ociutil/              — shared manifest discovery and layer extraction
   internal/testutil/             — shared image test infrastructure
 resolver/                        — bundle resolution from catalogs
+  v1/                            — canonical resolver: priority-based catalog selection, graph/version/successor filtering
+internal/util/                   — shared internal utilities
+  test/                          — cross-package test helpers (BundleIdentity, etc.)
+  iterx/                         — iterator utilities
 specs/                           — project specs and work items
 ```
 

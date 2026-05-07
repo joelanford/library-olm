@@ -173,9 +173,8 @@ func run() error {
 
 		// Successors from oldest bundle in this channel
 		if chFirstBundle != nil {
-			chFirstVer := chFirstBundle.NameVersionRelease().Version
 			var successorCount int
-			for _, err := range ch.Successors(ctx, chFirstBundle.ID(), chFirstVer) {
+			for _, err := range ch.Successors(ctx, chFirstBundle) {
 				if err != nil {
 					return fmt.Errorf("successors in channel %q: %w", chName, err)
 				}
@@ -200,10 +199,9 @@ func run() error {
 			break
 		}
 		if firstBundle != nil {
-			firstVer := firstBundle.NameVersionRelease().Version
 			start = time.Now()
 			var count int
-			for _, err := range composite.Successors(ctx, firstBundle.ID(), firstVer) {
+			for _, err := range composite.Successors(ctx, firstBundle) {
 				if err != nil {
 					return fmt.Errorf("successors (package): %w", err)
 				}

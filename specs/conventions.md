@@ -57,6 +57,10 @@ refactor: extract webhook validation into dedicated validator
 - `<descriptive-slug>` for ad-hoc work without a spec
 - No long-lived feature branches — keep PRs small and merge often
 
+## Shared Test Utilities
+
+Test helpers that cross root package boundaries (e.g., used by both `catalog/v1` and `resolver/v1` tests) go in `internal/util/test`. Package-specific test helpers stay in the test file that uses them.
+
 ## Test Coverage
 
 - Overall project coverage must not decrease

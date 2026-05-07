@@ -1,6 +1,10 @@
 package catalogv1
 
-import "context"
+import (
+	"context"
+
+	"k8s.io/apimachinery/pkg/labels"
+)
 
 // GraphID is the database identifier for a graph node.
 type GraphID int64
@@ -28,6 +32,15 @@ type PartialImportError interface {
 	PartialImport()
 }
 
+// StoreReader is the read-only subset of Store. A StoreReader obtained via
+// Select shares the underlying storage with its parent Store and is only
+// valid while the parent Store remains open.
+type StoreReader interface {
+	Get(name string) (Catalog, error)
+	List() ([]Catalog, error)
+	Select(selector labels.Selector) StoreReader
+}
+
 // Store manages a collection of named catalogs backed by persistent storage.
 //
 // Catalog values returned by Get and List are snapshots: their metadata
@@ -36,10 +49,9 @@ type PartialImportError interface {
 // Call Get again to obtain fresh metadata. Content queries (ListPackages,
 // GetPackage) always read from the underlying database on demand.
 type Store interface {
+	StoreReader
 	Set(ctx context.Context, name string, opts ...SetOption) (Catalog, error)
-	Get(name string) (Catalog, error)
 	Delete(name string) error
-	List() ([]Catalog, error)
 	Close() error
 }
 

@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/joelanford/library-olm/internal/util/iterx"
+	iterxutil "github.com/joelanford/library-olm/internal/util/iterx"
 )
 
 type PackageError struct {
@@ -35,7 +35,7 @@ func (e *importError) PartialImport()  {}
 func mergePackageErrors(pkgErrMaps ...map[string][]error) error {
 	merged := mergeMapSlices(pkgErrMaps...)
 	pkgErrs := make([]error, 0, len(merged))
-	for pkg, errs := range iterx.SortedMap(merged) {
+	for pkg, errs := range iterxutil.SortedMap(merged) {
 		slices.SortFunc(errs, func(a, b error) int {
 			return strings.Compare(a.Error(), b.Error())
 		})

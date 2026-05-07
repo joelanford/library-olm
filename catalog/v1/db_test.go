@@ -11,9 +11,11 @@ import (
 	bsemver "github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/labels"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	testutil "github.com/joelanford/library-olm/internal/util/test"
 )
 
 // testImporter adapts a function into a catalogv1.Importer.
@@ -488,16 +490,13 @@ func TestSuccessors_RangeOnly(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	v := mustVersion(t, "1.5.0")
-	ids := collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, testutil.BundleIdentity{BundleID: "nonexistent", NVR: bundlev1.NameVersionRelease{Version: bsemver.MustParse("1.5.0")}}))
 	assert.Equal(t, []string{"pkg.v2.0.0"}, ids)
 
-	v = mustVersion(t, "2.0.0")
-	ids = collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	ids = collectSuccessorIDs(t, ch.Successors(ctx, testutil.BundleIdentity{BundleID: "nonexistent", NVR: bundlev1.NameVersionRelease{Version: bsemver.MustParse("2.0.0")}}))
 	assert.Empty(t, ids, "version 2.0.0 should not match >=1.0.0 <2.0.0")
 
-	v = mustVersion(t, "0.9.0")
-	ids = collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	ids = collectSuccessorIDs(t, ch.Successors(ctx, testutil.BundleIdentity{BundleID: "nonexistent", NVR: bundlev1.NameVersionRelease{Version: bsemver.MustParse("0.9.0")}}))
 	assert.Empty(t, ids, "version 0.9.0 should not match >=1.0.0 <2.0.0")
 }
 
@@ -554,8 +553,7 @@ func TestSuccessors_ExplicitAndRange_Union(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	v := mustVersion(t, "1.0.0")
-	ids := collectSuccessorIDs(t, ch.Successors(ctx, "pkg.v1.0.0", v))
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")))
 	slices.Sort(ids)
 	assert.Equal(t, []string{"pkg.v2.0.0", "pkg.v3.0.0"}, ids, "union of explicit edge and range matches, deduplicated")
 }
@@ -594,8 +592,7 @@ func TestSuccessors_ZeroVersion(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	v := mustVersion(t, "0.0.0")
-	ids := collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, testutil.BundleIdentity{BundleID: "nonexistent", NVR: bundlev1.NameVersionRelease{Version: bsemver.MustParse("0.0.0")}}))
 	assert.Equal(t, []string{"pkg.v1.0.0"}, ids, "range should match version 0.0.0")
 }
 
@@ -616,8 +613,7 @@ func TestSuccessors_BundleIDNotInCatalog(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	v := mustVersion(t, "1.5.0")
-	ids := collectSuccessorIDs(t, ch.Successors(ctx, "totally-unknown.v99.99.99", v))
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, testutil.BundleIdentity{BundleID: "totally-unknown.v99.99.99", NVR: bundlev1.NameVersionRelease{Version: bsemver.MustParse("1.5.0")}}))
 	assert.Equal(t, []string{"pkg.v2.0.0"}, ids, "no explicit edges for unknown bundle, but range matches still work")
 }
 
@@ -638,16 +634,13 @@ func TestSuccessors_OrSyntax(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	v := mustVersion(t, "1.5.0")
-	ids := collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, testutil.BundleIdentity{BundleID: "nonexistent", NVR: bundlev1.NameVersionRelease{Version: bsemver.MustParse("1.5.0")}}))
 	assert.Equal(t, []string{"pkg.v2.0.0"}, ids, "1.5.0 matches first range")
 
-	v = mustVersion(t, "3.1.0")
-	ids = collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	ids = collectSuccessorIDs(t, ch.Successors(ctx, testutil.BundleIdentity{BundleID: "nonexistent", NVR: bundlev1.NameVersionRelease{Version: bsemver.MustParse("3.1.0")}}))
 	assert.Equal(t, []string{"pkg.v2.0.0"}, ids, "3.1.0 matches second range")
 
-	v = mustVersion(t, "2.5.0")
-	ids = collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	ids = collectSuccessorIDs(t, ch.Successors(ctx, testutil.BundleIdentity{BundleID: "nonexistent", NVR: bundlev1.NameVersionRelease{Version: bsemver.MustParse("2.5.0")}}))
 	assert.Empty(t, ids, "2.5.0 matches neither range")
 }
 
@@ -696,8 +689,7 @@ func TestSuccessors_MixedExplicitAndRanges(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	v := mustVersion(t, "1.0.0")
-	ids := collectSuccessorIDs(t, ch.Successors(ctx, "pkg.v1.0.0", v))
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")))
 	slices.Sort(ids)
 	assert.Equal(t, []string{"pkg.v1.1.0", "pkg.v2.0.0", "pkg.v3.0.0"}, ids,
 		"union of explicit edge and range matches")
@@ -754,9 +746,68 @@ func TestSuccessors_CompositeGraph_Ranges(t *testing.T) {
 	require.NoError(t, err)
 	composite := pkg.(catalogv1.CompositeUpdateGraph)
 
-	v := mustVersion(t, "1.0.0")
-	ids := collectSuccessorIDs(t, composite.Successors(ctx, "nonexistent", v))
+	ids := collectSuccessorIDs(t, composite.Successors(ctx, testutil.BundleIdentity{BundleID: "nonexistent", NVR: bundlev1.NameVersionRelease{Version: bsemver.MustParse("1.0.0")}}))
 	assert.Equal(t, []string{"pkg.v2.0.0"}, ids, "composite graph should find range matches across child graphs, deduplicated")
+}
+
+// --- Select tests ---
+
+func TestSelect_List(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_, err := store.Set(ctx, "prod-catalog",
+		catalogv1.WithURI("test://prod"),
+		catalogv1.WithLabels(map[string]string{"env": "prod"}),
+	)
+	require.NoError(t, err)
+
+	_, err = store.Set(ctx, "dev-catalog",
+		catalogv1.WithURI("test://dev"),
+		catalogv1.WithLabels(map[string]string{"env": "dev"}),
+	)
+	require.NoError(t, err)
+
+	selector, err := labels.Parse("env=prod")
+	require.NoError(t, err)
+
+	reader := store.Select(selector)
+	catalogs, err := reader.List()
+	require.NoError(t, err)
+	require.Len(t, catalogs, 1)
+	assert.Equal(t, "prod-catalog", catalogs[0].Name())
+}
+
+func TestSelect_Get(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_, err := store.Set(ctx, "prod-catalog",
+		catalogv1.WithURI("test://prod"),
+		catalogv1.WithLabels(map[string]string{"env": "prod"}),
+	)
+	require.NoError(t, err)
+
+	_, err = store.Set(ctx, "dev-catalog",
+		catalogv1.WithURI("test://dev"),
+		catalogv1.WithLabels(map[string]string{"env": "dev"}),
+	)
+	require.NoError(t, err)
+
+	selector, err := labels.Parse("env=prod")
+	require.NoError(t, err)
+
+	reader := store.Select(selector)
+
+	cat, err := reader.Get("prod-catalog")
+	require.NoError(t, err)
+	assert.Equal(t, "prod-catalog", cat.Name())
+
+	_, err = reader.Get("dev-catalog")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }
 
 // --- Helpers ---
@@ -787,11 +838,4 @@ func collectSuccessorIDs(t *testing.T, seq func(func(bundlev1.Bundle, error) boo
 		ids = append(ids, string(b.ID()))
 	}
 	return ids
-}
-
-func mustVersion(t *testing.T, s string) bsemver.Version {
-	t.Helper()
-	v, err := bsemver.Parse(s)
-	require.NoError(t, err)
-	return v
 }
