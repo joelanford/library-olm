@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 
+	bsemver "github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
@@ -409,6 +412,353 @@ func TestOpenStore_MetadataMigration_DefaultPriority(t *testing.T) {
 	assert.Equal(t, 0, cat.Priority(), "default priority should be 0")
 }
 
+// --- Predecessor range tests ---
+
+func rangeImporter(versionRange string) catalogv1.Importer {
+	return &testImporter{fn: func(_ context.Context, w catalogv1.Writer) error {
+		if err := w.InsertBundle("pkg.v1.0.0", "pkg", "1.0.0", "", "docker://example.com/pkg:v1.0.0"); err != nil {
+			return err
+		}
+		if err := w.InsertBundle("pkg.v2.0.0", "pkg", "2.0.0", "", "docker://example.com/pkg:v2.0.0"); err != nil {
+			return err
+		}
+		if err := w.InsertBundle("pkg.v3.0.0", "pkg", "3.0.0", "", "docker://example.com/pkg:v3.0.0"); err != nil {
+			return err
+		}
+		pkgGraph, err := w.CreateGraph("pkg", nil)
+		if err != nil {
+			return err
+		}
+		chGraph, err := w.CreateGraph("stable", &pkgGraph)
+		if err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(chGraph, "pkg.v1.0.0"); err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(chGraph, "pkg.v2.0.0"); err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(chGraph, "pkg.v3.0.0"); err != nil {
+			return err
+		}
+		return w.AddPredecessorRange(chGraph, "pkg.v2.0.0", versionRange)
+	}}
+}
+
+func TestAddPredecessorRange_Valid(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_, err := store.Set(ctx, "cat",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithContent(rangeImporter(">=1.0.0 <2.0.0"), "digest1"),
+	)
+	require.NoError(t, err)
+}
+
+func TestAddPredecessorRange_Invalid(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_, err := store.Set(ctx, "cat",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithContent(rangeImporter("not a range"), "digest1"),
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid predecessor range")
+}
+
+func TestSuccessors_RangeOnly(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	cat, err := store.Set(ctx, "cat",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithContent(rangeImporter(">=1.0.0 <2.0.0"), "digest1"),
+	)
+	require.NoError(t, err)
+
+	pkg, err := cat.GetPackage(ctx, "pkg")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+	ch, err := composite.GetGraph(ctx, "stable")
+	require.NoError(t, err)
+
+	v := mustVersion(t, "1.5.0")
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	assert.Equal(t, []string{"pkg.v2.0.0"}, ids)
+
+	v = mustVersion(t, "2.0.0")
+	ids = collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	assert.Empty(t, ids, "version 2.0.0 should not match >=1.0.0 <2.0.0")
+
+	v = mustVersion(t, "0.9.0")
+	ids = collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	assert.Empty(t, ids, "version 0.9.0 should not match >=1.0.0 <2.0.0")
+}
+
+func TestSuccessors_ExplicitAndRange_Union(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	imp := &testImporter{fn: func(_ context.Context, w catalogv1.Writer) error {
+		if err := w.InsertBundle("pkg.v1.0.0", "pkg", "1.0.0", "", "docker://example.com/pkg:v1"); err != nil {
+			return err
+		}
+		if err := w.InsertBundle("pkg.v2.0.0", "pkg", "2.0.0", "", "docker://example.com/pkg:v2"); err != nil {
+			return err
+		}
+		if err := w.InsertBundle("pkg.v3.0.0", "pkg", "3.0.0", "", "docker://example.com/pkg:v3"); err != nil {
+			return err
+		}
+		pkgGraph, err := w.CreateGraph("pkg", nil)
+		if err != nil {
+			return err
+		}
+		chGraph, err := w.CreateGraph("stable", &pkgGraph)
+		if err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(chGraph, "pkg.v1.0.0"); err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(chGraph, "pkg.v2.0.0"); err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(chGraph, "pkg.v3.0.0"); err != nil {
+			return err
+		}
+		if err := w.AddEdge(chGraph, "pkg.v1.0.0", "pkg.v2.0.0"); err != nil {
+			return err
+		}
+		// v2.0.0 is reachable via explicit edge; v3.0.0 via range
+		if err := w.AddPredecessorRange(chGraph, "pkg.v2.0.0", ">=1.0.0 <2.0.0"); err != nil {
+			return err
+		}
+		return w.AddPredecessorRange(chGraph, "pkg.v3.0.0", ">=1.0.0 <3.0.0")
+	}}
+	cat, err := store.Set(ctx, "cat",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithContent(imp, "digest1"),
+	)
+	require.NoError(t, err)
+
+	pkg, err := cat.GetPackage(ctx, "pkg")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+	ch, err := composite.GetGraph(ctx, "stable")
+	require.NoError(t, err)
+
+	v := mustVersion(t, "1.0.0")
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, "pkg.v1.0.0", v))
+	slices.Sort(ids)
+	assert.Equal(t, []string{"pkg.v2.0.0", "pkg.v3.0.0"}, ids, "union of explicit edge and range matches, deduplicated")
+}
+
+func TestSuccessors_ZeroVersion(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	imp := &testImporter{fn: func(_ context.Context, w catalogv1.Writer) error {
+		if err := w.InsertBundle("pkg.v1.0.0", "pkg", "1.0.0", "", "docker://example.com/pkg:v1"); err != nil {
+			return err
+		}
+		pkgGraph, err := w.CreateGraph("pkg", nil)
+		if err != nil {
+			return err
+		}
+		chGraph, err := w.CreateGraph("stable", &pkgGraph)
+		if err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(chGraph, "pkg.v1.0.0"); err != nil {
+			return err
+		}
+		return w.AddPredecessorRange(chGraph, "pkg.v1.0.0", ">=0.0.0")
+	}}
+	cat, err := store.Set(ctx, "cat",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithContent(imp, "digest1"),
+	)
+	require.NoError(t, err)
+
+	pkg, err := cat.GetPackage(ctx, "pkg")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+	ch, err := composite.GetGraph(ctx, "stable")
+	require.NoError(t, err)
+
+	v := mustVersion(t, "0.0.0")
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	assert.Equal(t, []string{"pkg.v1.0.0"}, ids, "range should match version 0.0.0")
+}
+
+func TestSuccessors_BundleIDNotInCatalog(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	cat, err := store.Set(ctx, "cat",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithContent(rangeImporter(">=1.0.0 <2.0.0"), "digest1"),
+	)
+	require.NoError(t, err)
+
+	pkg, err := cat.GetPackage(ctx, "pkg")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+	ch, err := composite.GetGraph(ctx, "stable")
+	require.NoError(t, err)
+
+	v := mustVersion(t, "1.5.0")
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, "totally-unknown.v99.99.99", v))
+	assert.Equal(t, []string{"pkg.v2.0.0"}, ids, "no explicit edges for unknown bundle, but range matches still work")
+}
+
+func TestSuccessors_OrSyntax(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	cat, err := store.Set(ctx, "cat",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithContent(rangeImporter(">=1.0.0 <2.0.0 || >=3.0.0"), "digest1"),
+	)
+	require.NoError(t, err)
+
+	pkg, err := cat.GetPackage(ctx, "pkg")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+	ch, err := composite.GetGraph(ctx, "stable")
+	require.NoError(t, err)
+
+	v := mustVersion(t, "1.5.0")
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	assert.Equal(t, []string{"pkg.v2.0.0"}, ids, "1.5.0 matches first range")
+
+	v = mustVersion(t, "3.1.0")
+	ids = collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	assert.Equal(t, []string{"pkg.v2.0.0"}, ids, "3.1.0 matches second range")
+
+	v = mustVersion(t, "2.5.0")
+	ids = collectSuccessorIDs(t, ch.Successors(ctx, "nonexistent", v))
+	assert.Empty(t, ids, "2.5.0 matches neither range")
+}
+
+func TestSuccessors_MixedExplicitAndRanges(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	imp := &testImporter{fn: func(_ context.Context, w catalogv1.Writer) error {
+		for _, v := range []string{"1.0.0", "1.1.0", "2.0.0", "3.0.0"} {
+			bid := "pkg.v" + v
+			if err := w.InsertBundle(bid, "pkg", v, "", "docker://example.com/pkg:v"+v); err != nil {
+				return err
+			}
+		}
+		pkgGraph, err := w.CreateGraph("pkg", nil)
+		if err != nil {
+			return err
+		}
+		chGraph, err := w.CreateGraph("stable", &pkgGraph)
+		if err != nil {
+			return err
+		}
+		for _, v := range []string{"1.0.0", "1.1.0", "2.0.0", "3.0.0"} {
+			if err := w.AddBundleToGraph(chGraph, "pkg.v"+v); err != nil {
+				return err
+			}
+		}
+		if err := w.AddEdge(chGraph, "pkg.v1.0.0", "pkg.v1.1.0"); err != nil {
+			return err
+		}
+		if err := w.AddPredecessorRange(chGraph, "pkg.v2.0.0", ">=1.0.0"); err != nil {
+			return err
+		}
+		return w.AddPredecessorRange(chGraph, "pkg.v3.0.0", ">=1.0.0")
+	}}
+	cat, err := store.Set(ctx, "cat",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithContent(imp, "digest1"),
+	)
+	require.NoError(t, err)
+
+	pkg, err := cat.GetPackage(ctx, "pkg")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+	ch, err := composite.GetGraph(ctx, "stable")
+	require.NoError(t, err)
+
+	v := mustVersion(t, "1.0.0")
+	ids := collectSuccessorIDs(t, ch.Successors(ctx, "pkg.v1.0.0", v))
+	slices.Sort(ids)
+	assert.Equal(t, []string{"pkg.v1.1.0", "pkg.v2.0.0", "pkg.v3.0.0"}, ids,
+		"union of explicit edge and range matches")
+}
+
+func TestSuccessors_CompositeGraph_Ranges(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	imp := &testImporter{fn: func(_ context.Context, w catalogv1.Writer) error {
+		if err := w.InsertBundle("pkg.v1.0.0", "pkg", "1.0.0", "", "docker://example.com/pkg:v1"); err != nil {
+			return err
+		}
+		if err := w.InsertBundle("pkg.v2.0.0", "pkg", "2.0.0", "", "docker://example.com/pkg:v2"); err != nil {
+			return err
+		}
+		pkgGraph, err := w.CreateGraph("pkg", nil)
+		if err != nil {
+			return err
+		}
+		ch1, err := w.CreateGraph("stable", &pkgGraph)
+		if err != nil {
+			return err
+		}
+		ch2, err := w.CreateGraph("fast", &pkgGraph)
+		if err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(ch1, "pkg.v1.0.0"); err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(ch1, "pkg.v2.0.0"); err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(ch2, "pkg.v1.0.0"); err != nil {
+			return err
+		}
+		if err := w.AddBundleToGraph(ch2, "pkg.v2.0.0"); err != nil {
+			return err
+		}
+		if err := w.AddPredecessorRange(ch1, "pkg.v2.0.0", ">=1.0.0"); err != nil {
+			return err
+		}
+		return w.AddPredecessorRange(ch2, "pkg.v2.0.0", ">=1.0.0")
+	}}
+	cat, err := store.Set(ctx, "cat",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithContent(imp, "digest1"),
+	)
+	require.NoError(t, err)
+
+	pkg, err := cat.GetPackage(ctx, "pkg")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+
+	v := mustVersion(t, "1.0.0")
+	ids := collectSuccessorIDs(t, composite.Successors(ctx, "nonexistent", v))
+	assert.Equal(t, []string{"pkg.v2.0.0"}, ids, "composite graph should find range matches across child graphs, deduplicated")
+}
+
 // --- Helpers ---
 
 func newTempStore(t *testing.T) (catalogv1.Store, func()) {
@@ -427,4 +777,21 @@ func collectPackageNames(t *testing.T, ctx context.Context, cat catalogv1.Catalo
 		names = append(names, pkg.Name())
 	}
 	return names
+}
+
+func collectSuccessorIDs(t *testing.T, seq func(func(bundlev1.Bundle, error) bool)) []string {
+	t.Helper()
+	var ids []string
+	for b, err := range seq {
+		require.NoError(t, err)
+		ids = append(ids, string(b.ID()))
+	}
+	return ids
+}
+
+func mustVersion(t *testing.T, s string) bsemver.Version {
+	t.Helper()
+	v, err := bsemver.Parse(s)
+	require.NoError(t, err)
+	return v
 }

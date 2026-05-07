@@ -6,7 +6,7 @@ import (
 )
 
 // ContentSchemaVersion is the current version of the content schema.
-const ContentSchemaVersion = 1
+const ContentSchemaVersion = 3
 
 const contentSchemaSQL = `
 CREATE TABLE content_schema_version (
@@ -51,8 +51,18 @@ CREATE TABLE content_successors (
     FOREIGN KEY (to_bundle_id) REFERENCES content_bundles(id)
 );
 
+CREATE TABLE content_predecessor_ranges (
+    graph_id      INTEGER NOT NULL,
+    bundle_id     INTEGER NOT NULL,
+    version_range TEXT NOT NULL,
+    PRIMARY KEY (graph_id, bundle_id),
+    FOREIGN KEY (graph_id) REFERENCES content_graphs(id),
+    FOREIGN KEY (bundle_id) REFERENCES content_bundles(id)
+);
+
 CREATE INDEX idx_content_graphs_parent ON content_graphs(parent_id);
 CREATE INDEX idx_content_successors_lookup ON content_successors(graph_id, from_bundle_id);
+CREATE INDEX idx_content_predecessor_ranges_lookup ON content_predecessor_ranges(graph_id);
 `
 
 // CreateContentTables creates the content schema tables in the database.

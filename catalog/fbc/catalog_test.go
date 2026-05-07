@@ -8,6 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	bsemver "github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -92,7 +93,7 @@ func TestImporter_ValidCatalog(t *testing.T) {
 		})
 
 		t.Run("Successors_Package", func(t *testing.T) {
-			names := collectBundleIDs(t, composite.Successors(ctx, "my-operator.v1.0.0"))
+			names := collectBundleIDs(t, composite.Successors(ctx, "my-operator.v1.0.0", bver(t, "1.0.0")))
 			slices.Sort(names)
 			assert.Equal(t, []string{"my-operator.v1.1.0", "my-operator.v1.2.0"}, names)
 		})
@@ -113,12 +114,12 @@ func TestImporter_ValidCatalog(t *testing.T) {
 		})
 
 		t.Run("Successors_Channel", func(t *testing.T) {
-			names := collectBundleIDs(t, stable.Successors(ctx, "my-operator.v1.0.0"))
+			names := collectBundleIDs(t, stable.Successors(ctx, "my-operator.v1.0.0", bver(t, "1.0.0")))
 			assert.Equal(t, []string{"my-operator.v1.1.0"}, names)
 		})
 
 		t.Run("Successors_NoSuccessors", func(t *testing.T) {
-			names := collectBundleIDs(t, stable.Successors(ctx, "my-operator.v1.1.0"))
+			names := collectBundleIDs(t, stable.Successors(ctx, "my-operator.v1.1.0", bver(t, "1.1.0")))
 			assert.Empty(t, names)
 		})
 	})
@@ -161,12 +162,12 @@ func TestImporter_SkipRange(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	names := collectBundleIDs(t, ch.Successors(ctx, "skip-operator.v1.0.0"))
+	names := collectBundleIDs(t, ch.Successors(ctx, "skip-operator.v1.0.0", bver(t, "1.0.0")))
 	slices.Sort(names)
 	// v1.5.0 replaces v1.0.0, and v2.0.0's skipRange includes v1.0.0
 	assert.Equal(t, []string{"skip-operator.v1.5.0", "skip-operator.v2.0.0"}, names)
 
-	names = collectBundleIDs(t, ch.Successors(ctx, "skip-operator.v1.5.0"))
+	names = collectBundleIDs(t, ch.Successors(ctx, "skip-operator.v1.5.0", bver(t, "1.5.0")))
 	slices.Sort(names)
 	assert.Equal(t, []string{"skip-operator.v2.0.0"}, names)
 }
@@ -193,7 +194,7 @@ func TestImporter_SkipsWithPhantomBundle(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	names := collectBundleIDs(t, ch.Successors(ctx, "skip-op.v0.9.0"))
+	names := collectBundleIDs(t, ch.Successors(ctx, "skip-op.v0.9.0", bver(t, "0.9.0")))
 	assert.Equal(t, []string{"skip-op.v2.0.0"}, names)
 }
 
@@ -217,7 +218,7 @@ func TestImporter_DanglingReplaces(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	names := collectBundleIDs(t, ch.Successors(ctx, "repl-op.v0.1.0"))
+	names := collectBundleIDs(t, ch.Successors(ctx, "repl-op.v0.1.0", bver(t, "0.1.0")))
 	assert.Equal(t, []string{"repl-op.v1.0.0"}, names)
 }
 
@@ -327,7 +328,7 @@ func TestImporter_PreReleaseVersion(t *testing.T) {
 	assert.True(t, nvr.Release.IsEmpty())
 
 	// skipRange ">=0.9.0 <1.0.0" should match 1.0.0-rc1 (since 1.0.0-rc1 < 1.0.0 in semver)
-	names := collectBundleIDs(t, ch.Successors(ctx, "pre-op.v1.0.0-rc1"))
+	names := collectBundleIDs(t, ch.Successors(ctx, "pre-op.v1.0.0-rc1", bver(t, "1.0.0-rc1")))
 	assert.Equal(t, []string{"pre-op.v1.0.0"}, names)
 }
 
@@ -417,7 +418,7 @@ func TestImporter_SuccessorsUnknownBundle(t *testing.T) {
 	ch, err := composite.GetGraph(ctx, "stable")
 	require.NoError(t, err)
 
-	names := collectBundleIDs(t, ch.Successors(ctx, "nonexistent.v9.9.9"))
+	names := collectBundleIDs(t, ch.Successors(ctx, "nonexistent.v9.9.9", bver(t, "9.9.9")))
 	assert.Empty(t, names)
 }
 
@@ -528,6 +529,13 @@ func TestImporter_BundleWithUnqualifiedImage(t *testing.T) {
 
 	requirePackageError(t, importErr, "short", "parse image")
 	assertEmptyCatalog(t, ctx, cat)
+}
+
+func bver(t *testing.T, s string) bsemver.Version {
+	t.Helper()
+	v, err := bsemver.Parse(s)
+	require.NoError(t, err)
+	return v
 }
 
 func collectBundleIDs(t *testing.T, seq func(func(bundlev1.Bundle, error) bool)) []string {
