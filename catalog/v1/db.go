@@ -157,12 +157,18 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 
 	// Handle labels
 	if cfg.labels != nil {
+		if v, ok := (*cfg.labels)[labelCatalogName]; ok && v != name {
+			return nil, fmt.Errorf("label %q is reserved and must match the catalog name", labelCatalogName)
+		}
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM catalog_labels WHERE catalog_name = ?", name,
 		); err != nil {
 			return nil, fmt.Errorf("deleting existing labels: %w", err)
 		}
 		for k, v := range *cfg.labels {
+			if k == labelCatalogName {
+				continue
+			}
 			if _, err := tx.ExecContext(ctx,
 				"INSERT INTO catalog_labels (catalog_name, key, value) VALUES (?, ?, ?)",
 				name, k, v,
@@ -170,6 +176,13 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 				return nil, fmt.Errorf("inserting label %q: %w", k, err)
 			}
 		}
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		"INSERT OR REPLACE INTO catalog_labels (catalog_name, key, value) VALUES (?, ?, ?)",
+		name, labelCatalogName, name,
+	); err != nil {
+		return nil, fmt.Errorf("inserting reserved label: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {

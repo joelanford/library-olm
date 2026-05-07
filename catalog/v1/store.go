@@ -6,6 +6,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
+const labelCatalogName = "olm.operatorframework.io/metadata.name"
+
 // GraphID is the database identifier for a graph node.
 type GraphID int64
 
