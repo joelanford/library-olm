@@ -96,7 +96,7 @@ func TestSet_NewWithURI(t *testing.T) {
 	assert.Equal(t, "docker://registry.example.com/catalog:latest", cat.URI())
 	assert.Equal(t, 0, cat.Priority())
 	assert.Empty(t, cat.Digest())
-	assert.Empty(t, cat.Labels())
+	assert.Equal(t, map[string]string{"olm.operatorframework.io/metadata.name": "my-catalog"}, cat.Labels())
 }
 
 func TestSet_NewWithoutURI_Error(t *testing.T) {
@@ -144,22 +144,109 @@ func TestSet_Labels(t *testing.T) {
 		catalogv1.WithLabels(map[string]string{"env": "prod", "tier": "1"}),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"env": "prod", "tier": "1"}, cat.Labels())
+	assert.Equal(t, map[string]string{
+		"olm.operatorframework.io/metadata.name": "cat",
+		"env":                                    "prod", "tier": "1",
+	}, cat.Labels())
 
 	// Update labels: old labels should be replaced entirely
 	cat, err = store.Set(ctx, "cat",
 		catalogv1.WithLabels(map[string]string{"env": "staging"}),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"env": "staging"}, cat.Labels(),
-		"old labels should be removed, only new labels present")
+	assert.Equal(t, map[string]string{
+		"olm.operatorframework.io/metadata.name": "cat",
+		"env":                                    "staging",
+	}, cat.Labels(), "old labels should be removed, only new labels present")
 
-	// Clear labels by setting empty map
+	// Clear labels by setting empty map — reserved label should remain
 	cat, err = store.Set(ctx, "cat",
 		catalogv1.WithLabels(map[string]string{}),
 	)
 	require.NoError(t, err)
-	assert.Empty(t, cat.Labels())
+	assert.Equal(t, map[string]string{
+		"olm.operatorframework.io/metadata.name": "cat",
+	}, cat.Labels())
+}
+
+func TestSet_ReservedLabel_AutoInjected(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	cat, err := store.Set(ctx, "foo", catalogv1.WithURI("test://"))
+	require.NoError(t, err)
+	assert.Equal(t, "foo", cat.Labels()["olm.operatorframework.io/metadata.name"])
+}
+
+func TestSet_ReservedLabel_ConflictError(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_, err := store.Set(ctx, "foo",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithLabels(map[string]string{
+			"olm.operatorframework.io/metadata.name": "bar",
+		}),
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reserved")
+
+	_, err = store.Get("foo")
+	require.Error(t, err, "catalog should not be stored after conflict error")
+}
+
+func TestSet_ReservedLabel_RedundantOK(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	cat, err := store.Set(ctx, "foo",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithLabels(map[string]string{
+			"olm.operatorframework.io/metadata.name": "foo",
+			"env":                                    "prod",
+		}),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"olm.operatorframework.io/metadata.name": "foo",
+		"env":                                    "prod",
+	}, cat.Labels())
+}
+
+func TestSet_ReservedLabel_PreservedOnUpdate(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_, err := store.Set(ctx, "foo", catalogv1.WithURI("test://"))
+	require.NoError(t, err)
+
+	cat, err := store.Set(ctx, "foo", catalogv1.WithPriority(5))
+	require.NoError(t, err)
+	assert.Equal(t, "foo", cat.Labels()["olm.operatorframework.io/metadata.name"])
+}
+
+func TestSelect_ByName(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_, err := store.Set(ctx, "alpha", catalogv1.WithURI("test://a"))
+	require.NoError(t, err)
+	_, err = store.Set(ctx, "bravo", catalogv1.WithURI("test://b"))
+	require.NoError(t, err)
+
+	selector, err := labels.Parse("olm.operatorframework.io/metadata.name=alpha")
+	require.NoError(t, err)
+
+	reader := store.Select(selector)
+	catalogs, err := reader.List()
+	require.NoError(t, err)
+	require.Len(t, catalogs, 1)
+	assert.Equal(t, "alpha", catalogs[0].Name())
 }
 
 func TestGet_NotFound(t *testing.T) {
