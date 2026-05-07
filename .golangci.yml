@@ -39,6 +39,10 @@ linters:
           alias: bsemver
         - pkg: github.com/Masterminds/semver/v3
           alias: mmsemver
+        - pkg: github.com/joelanford/library-olm/internal/util/(\w+)
+          alias: ${1}util
+        - pkg: github.com/joelanford/library-olm/resolver/v1
+          alias: resolverv1
     depguard:
       rules:
         operator-framework:

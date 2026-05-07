@@ -109,8 +109,8 @@ func (g *CompositeUpdateGraphQuery) ListBundles(ctx context.Context) iter.Seq2[b
 	return queryBundlesDescendant(ctx, g.DB, g.GraphID)
 }
 
-func (g *CompositeUpdateGraphQuery) Successors(ctx context.Context, fromID bundlev1.BundleID, fromVersion bsemver.Version) iter.Seq2[bundlev1.Bundle, error] {
-	return querySuccessorsDescendant(ctx, g.DB, g.GraphID, fromID, fromVersion)
+func (g *CompositeUpdateGraphQuery) Successors(ctx context.Context, from bundlev1.BundleIdentity) iter.Seq2[bundlev1.Bundle, error] {
+	return querySuccessorsDescendant(ctx, g.DB, g.GraphID, from.ID(), from.NameVersionRelease().Version)
 }
 
 // ListGraphs returns an iterator over the child update graphs.
@@ -143,19 +143,17 @@ func (g *CompositeUpdateGraphQuery) ListGraphs(ctx context.Context) iter.Seq2[*U
 	}
 }
 
-// GetGraph returns a specific child update graph by name.
-func (g *CompositeUpdateGraphQuery) GetGraph(ctx context.Context, name string) (*UpdateGraphQuery, error) {
-	var id int64
-	err := g.DB.QueryRowContext(ctx,
-		"SELECT id FROM content_graphs WHERE name = ? AND parent_id = ?", name, g.GraphID,
-	).Scan(&id)
+// GetGraph returns a specific child update graph by name and whether it has children of its own.
+func (g *CompositeUpdateGraphQuery) GetGraph(ctx context.Context, name string) (id int64, hasChildren bool, err error) {
+	err = g.DB.QueryRowContext(ctx,
+		`SELECT g.id, EXISTS(SELECT 1 FROM content_graphs c WHERE c.parent_id = g.id)
+		 FROM content_graphs g
+		 WHERE g.name = ? AND g.parent_id = ?`, name, g.GraphID,
+	).Scan(&id, &hasChildren)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("graph %q not found in %q", name, g.GraphName)
+		return 0, false, fmt.Errorf("graph %q not found in %q", name, g.GraphName)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &UpdateGraphQuery{DB: g.DB, GraphID: id, GraphName: name}, nil
+	return id, hasChildren, err
 }
 
 // UpdateGraphQuery provides query operations for a leaf update graph (e.g. a channel).
@@ -171,8 +169,8 @@ func (g *UpdateGraphQuery) ListBundles(ctx context.Context) iter.Seq2[bundlev1.B
 	return queryBundlesDirect(ctx, g.DB, g.GraphID)
 }
 
-func (g *UpdateGraphQuery) Successors(ctx context.Context, fromID bundlev1.BundleID, fromVersion bsemver.Version) iter.Seq2[bundlev1.Bundle, error] {
-	return querySuccessorsDirect(ctx, g.DB, g.GraphID, fromID, fromVersion)
+func (g *UpdateGraphQuery) Successors(ctx context.Context, from bundlev1.BundleIdentity) iter.Seq2[bundlev1.Bundle, error] {
+	return querySuccessorsDirect(ctx, g.DB, g.GraphID, from.ID(), from.NameVersionRelease().Version)
 }
 
 func queryBundlesDirect(ctx context.Context, db *sql.DB, graphID int64) iter.Seq2[bundlev1.Bundle, error] {

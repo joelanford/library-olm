@@ -1,5 +1,6 @@
 ---
-status: ready
+status: done
+pr: https://github.com/joelanford/library-olm/pull/4
 ---
 # Store Resolver
 
