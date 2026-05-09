@@ -9,9 +9,9 @@ Both the content DB and staging DB use `MaxOpenConns(1)` to serialize access. Th
 
 This affects two areas today:
 
-1. **Staging DB accessors**: `PackageAccessor.Bundles()`, `Channels()`, `Deprecations()`, `Others()`, and `channelAccessor.Entries()` all stream from live cursors. Nesting any of these (e.g., iterating bundles while also iterating channels in `FinalizePackage`) deadlocks. The current workaround is pre-collecting results into slices before yielding, which works but increases memory usage and prevents lazy evaluation.
+1. **Staging DB accessors**: `PackageAccessor.Bundles()`, `Channels()`, `Deprecations()`, `Others()`, and `channelAccessor.Entries()` previously streamed from live cursors. Nesting any of these (e.g., iterating bundles while also iterating channels in `FinalizePackage`) deadlocked. The current workaround is pre-collecting results into slices before yielding, which works but increases memory usage and prevents lazy evaluation.
 
-2. **Content DB queries**: `BundleRow.Property()` executes a query against the content DB. Calling it inside a `ListBundles` or `Successors` iterator (which holds an open cursor) deadlocks. Callers must collect bundles first, then query properties — an awkward API constraint.
+2. **Content DB queries**: `BundleRow.Property()` and graph `Property()` queries execute additional reads against the same content DB. Calling them inside streaming iterators (`ListPackages`, `ListGraphs`, `ListBundles`, `Successors`) deadlocked when those iterators held open cursors. The current workaround is pre-collecting those iterator results before yielding.
 
 ## Idea
 
@@ -19,7 +19,7 @@ Open the same DB file twice — one `*sql.DB` with `MaxOpenConns(1)` for writes 
 
 This would let callers freely nest read iterators and call `Property()` inside iteration loops without deadlocking, while keeping write serialization simple.
 
-Once implemented, the pre-collection pattern in the staging DB accessors (`collectChannels`, etc.) can be replaced with direct streaming, reducing memory overhead for large catalogs.
+Once implemented, the pre-collection pattern in both staging DB accessors (`collectChannels`, etc.) and content DB query iterators can be replaced with direct streaming, reducing memory overhead for large catalogs.
 
 ## Notes
 
