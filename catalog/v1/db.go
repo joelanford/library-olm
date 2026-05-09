@@ -3,6 +3,7 @@ package catalogv1
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"maps"
@@ -31,6 +32,7 @@ func OpenStore(path string) (Store, error) {
 		PRAGMA journal_mode=WAL;
 		PRAGMA synchronous=NORMAL;
 		PRAGMA busy_timeout=5000;
+		PRAGMA foreign_keys=ON;
 	`); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("setting pragmas: %w", err)
@@ -230,16 +232,8 @@ func (d *db) Delete(name string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := internal.DeleteCatalogContent(tx, name); err != nil {
-		return fmt.Errorf("deleting content: %w", err)
-	}
-
-	if _, err := tx.Exec("DELETE FROM catalog_labels WHERE catalog_name = ?", name); err != nil {
-		return fmt.Errorf("deleting labels: %w", err)
-	}
-
 	if _, err := tx.Exec("DELETE FROM catalog_metadata WHERE name = ?", name); err != nil {
-		return fmt.Errorf("deleting metadata: %w", err)
+		return fmt.Errorf("deleting catalog: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -371,6 +365,10 @@ type compositeUpdateGraphWrapper struct {
 
 func (w *compositeUpdateGraphWrapper) Name() string { return w.q.Name() }
 
+func (w *compositeUpdateGraphWrapper) Property(ctx context.Context, key string) (json.RawMessage, error) {
+	return w.q.Property(ctx, key)
+}
+
 func (w *compositeUpdateGraphWrapper) ListBundles(ctx context.Context) iter.Seq2[bundlev1.Bundle, error] {
 	return w.q.ListBundles(ctx)
 }
@@ -402,10 +400,10 @@ func (w *compositeUpdateGraphWrapper) GetGraph(ctx context.Context, name string)
 	}
 	if hasChildren {
 		return &compositeUpdateGraphWrapper{
-			q: &internal.CompositeUpdateGraphQuery{DB: w.q.DB, GraphID: id, GraphName: name},
+			q: &internal.CompositeUpdateGraphQuery{DB: w.q.DB, CatalogName: w.q.CatalogName, GraphID: id, GraphName: name},
 		}, nil
 	}
-	return &internal.UpdateGraphQuery{DB: w.q.DB, GraphID: id, GraphName: name}, nil
+	return &internal.UpdateGraphQuery{DB: w.q.DB, CatalogName: w.q.CatalogName, GraphID: id, GraphName: name}, nil
 }
 
 func (d *db) Select(selector labels.Selector) StoreReader {
@@ -461,29 +459,28 @@ func (w *writerAdapter) InsertBundle(id, pkg, version, release, uri string) erro
 	return w.cw.InsertBundle(id, pkg, version, release, uri)
 }
 
-func (w *writerAdapter) CreateGraph(name string, parent *GraphID) (GraphID, error) {
-	var p *int64
-	if parent != nil {
-		v := int64(*parent)
-		p = &v
-	}
-	id, err := w.cw.CreateGraph(name, p)
-	if err != nil {
-		return 0, err
-	}
-	return GraphID(id), nil
+func (w *writerAdapter) CreateGraph(path []string) error {
+	return w.cw.CreateGraph(path)
 }
 
-func (w *writerAdapter) AddBundleToGraph(graph GraphID, bundleID string) error {
-	return w.cw.AddBundleToGraph(int64(graph), bundleID)
+func (w *writerAdapter) AddBundleToGraph(path []string, bundleID string) error {
+	return w.cw.AddBundleToGraph(path, bundleID)
 }
 
-func (w *writerAdapter) AddEdge(graph GraphID, fromBundleID, toBundleID string) error {
-	return w.cw.AddEdge(int64(graph), fromBundleID, toBundleID)
+func (w *writerAdapter) AddEdge(path []string, fromBundleID, toBundleID string) error {
+	return w.cw.AddEdge(path, fromBundleID, toBundleID)
 }
 
-func (w *writerAdapter) AddPredecessorRange(graph GraphID, bundleID, versionRange string) error {
-	return w.cw.AddPredecessorRange(int64(graph), bundleID, versionRange)
+func (w *writerAdapter) AddPredecessorRange(path []string, bundleID, versionRange string) error {
+	return w.cw.AddPredecessorRange(path, bundleID, versionRange)
+}
+
+func (w *writerAdapter) SetBundleProperty(bundleID, key string, val any) error {
+	return w.cw.SetBundleProperty(bundleID, key, val)
+}
+
+func (w *writerAdapter) SetGraphProperty(path []string, key string, val any) error {
+	return w.cw.SetGraphProperty(path, key, val)
 }
 
 // Compile-time interface checks.

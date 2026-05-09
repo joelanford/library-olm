@@ -18,11 +18,20 @@ type ingestRow struct {
 	fn func(tx *sql.Tx) error
 }
 
+// IngestExtension is the subset of fbc.OLMPackageExtension used during ingest.
+type IngestExtension interface {
+	OnPackage(declcfg.Package) (any, error)
+	OnChannel(declcfg.Channel) (any, error)
+	OnBundle(declcfg.Bundle) (any, error)
+	OnDeprecation(declcfg.Deprecation) (any, error)
+	OnOther(declcfg.Meta) (any, error)
+}
+
 type IngestResult struct {
 	PackageErrors map[string][]error
 }
 
-func Ingest(ctx context.Context, db *sql.DB, fsys fs.FS) (*IngestResult, error) {
+func Ingest(ctx context.Context, db *sql.DB, fsys fs.FS, ext IngestExtension) (*IngestResult, error) {
 	rowCh := make(chan ingestRow, 256)
 	errCh := make(chan error, 1)
 
@@ -48,19 +57,24 @@ func Ingest(ctx context.Context, db *sql.DB, fsys fs.FS) (*IngestResult, error) 
 		var parseErr error
 		switch meta.Schema {
 		case declcfg.SchemaPackage:
-			insert, parseErr = parsePackage(meta)
+			insert, parseErr = parsePackage(meta, ext)
 		case declcfg.SchemaChannel:
-			insert, parseErr = parseChannel(meta)
+			insert, parseErr = parseChannel(meta, ext)
 		case declcfg.SchemaBundle:
-			insert, parseErr = parseBundle(meta)
+			insert, parseErr = parseBundle(meta, ext)
+		case declcfg.SchemaDeprecation:
+			insert, parseErr = parseDeprecation(meta, ext)
 		default:
-			return nil
+			insert, parseErr = parseOther(meta, ext)
 		}
 		if parseErr != nil {
 			if meta.Package == "" {
 				return parseErr
 			}
 			recordError(meta.Package, parseErr)
+			return nil
+		}
+		if insert == nil {
 			return nil
 		}
 		return sendRow(ctx, rowCh, insert)
@@ -87,25 +101,33 @@ func sendRow(ctx context.Context, rowCh chan<- ingestRow, fn func(tx *sql.Tx) er
 	}
 }
 
-func parsePackage(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
+func parsePackage(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx) error, error) {
 	var p declcfg.Package
 	if err := json.Unmarshal(meta.Blob, &p); err != nil {
 		return nil, fmt.Errorf("parse package: %w", err)
 	}
+	extData, err := marshalExtensionResult(ext, func(e IngestExtension) (any, error) { return e.OnPackage(p) })
+	if err != nil {
+		return nil, fmt.Errorf("OnPackage(%q): %w", p.Name, err)
+	}
 	return func(tx *sql.Tx) error {
-		_, err := tx.Exec("INSERT INTO "+TableRawPackage+" (package_name) VALUES (?)", p.Name)
+		_, err := tx.Exec("INSERT INTO "+TableRawPackage+" (package_name, ext_data) VALUES (?, ?)", p.Name, nullableJSON(extData))
 		return err
 	}, nil
 }
 
-func parseChannel(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
+func parseChannel(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx) error, error) {
 	var ch declcfg.Channel
 	if err := json.Unmarshal(meta.Blob, &ch); err != nil {
 		return nil, fmt.Errorf("parse channel: %w", err)
 	}
+	extData, err := marshalExtensionResult(ext, func(e IngestExtension) (any, error) { return e.OnChannel(ch) })
+	if err != nil {
+		return nil, fmt.Errorf("OnChannel(%q): %w", ch.Name, err)
+	}
 	return func(tx *sql.Tx) error {
-		if _, err := tx.Exec("INSERT INTO "+TableRawChannel+" (name, package_name) VALUES (?, ?)",
-			ch.Name, ch.Package); err != nil {
+		if _, err := tx.Exec("INSERT INTO "+TableRawChannel+" (name, package_name, ext_data) VALUES (?, ?, ?)",
+			ch.Name, ch.Package, nullableJSON(extData)); err != nil {
 			return err
 		}
 		for _, entry := range ch.Entries {
@@ -121,7 +143,7 @@ func parseChannel(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
 	}, nil
 }
 
-func parseBundle(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
+func parseBundle(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx) error, error) {
 	var b declcfg.Bundle
 	if err := json.Unmarshal(meta.Blob, &b); err != nil {
 		return nil, fmt.Errorf("parse bundle: %w", err)
@@ -130,11 +152,74 @@ func parseBundle(meta *declcfg.Meta) (func(tx *sql.Tx) error, error) {
 	if err != nil {
 		return nil, err
 	}
+	extData, err := marshalExtensionResult(ext, func(e IngestExtension) (any, error) { return e.OnBundle(b) })
+	if err != nil {
+		return nil, fmt.Errorf("OnBundle(%q): %w", b.Name, err)
+	}
 	return func(tx *sql.Tx) error {
-		_, err := tx.Exec("INSERT INTO "+TableRawBundle+" (name, package_name, version, release, image) VALUES (?, ?, ?, ?, ?)",
-			b.Name, b.Package, version, release, b.Image)
+		_, err := tx.Exec("INSERT INTO "+TableRawBundle+" (name, package_name, version, release, image, ext_data) VALUES (?, ?, ?, ?, ?, ?)",
+			b.Name, b.Package, version, release, b.Image, nullableJSON(extData))
 		return err
 	}, nil
+}
+
+func parseDeprecation(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx) error, error) {
+	if ext == nil {
+		return nil, nil
+	}
+	var d declcfg.Deprecation
+	if err := json.Unmarshal(meta.Blob, &d); err != nil {
+		return nil, fmt.Errorf("parse deprecation: %w", err)
+	}
+	extData, err := marshalExtensionResult(ext, func(e IngestExtension) (any, error) { return e.OnDeprecation(d) })
+	if err != nil {
+		return nil, fmt.Errorf("OnDeprecation(%q): %w", d.Package, err)
+	}
+	return func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO "+TableRawDeprecation+" (package_name, ext_data) VALUES (?, ?)",
+			d.Package, nullableJSON(extData))
+		return err
+	}, nil
+}
+
+func parseOther(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx) error, error) {
+	if ext == nil {
+		return nil, nil
+	}
+	extData, err := marshalExtensionResult(ext, func(e IngestExtension) (any, error) { return e.OnOther(*meta) })
+	if err != nil {
+		return nil, fmt.Errorf("OnOther(%q/%q): %w", meta.Schema, meta.Name, err)
+	}
+	return func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO "+TableRawOther+" (schema, package_name, name, ext_data) VALUES (?, ?, ?, ?)",
+			meta.Schema, meta.Package, meta.Name, nullableJSON(extData))
+		return err
+	}, nil
+}
+
+func marshalExtensionResult(ext IngestExtension, cb func(IngestExtension) (any, error)) ([]byte, error) {
+	if ext == nil {
+		return nil, nil
+	}
+	result, err := cb(ext)
+	if err != nil {
+		return nil, fmt.Errorf("extension callback: %w", err)
+	}
+	if result == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("marshal extension data: %w", err)
+	}
+	return data, nil
+}
+
+func nullableJSON(data []byte) any {
+	if data == nil {
+		return nil
+	}
+	return string(data)
 }
 
 func extractBundleVersionRelease(b declcfg.Bundle) (string, string, error) {

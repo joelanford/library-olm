@@ -6,7 +6,7 @@ import (
 )
 
 // ContentSchemaVersion is the current version of the content schema.
-const ContentSchemaVersion = 3
+const ContentSchemaVersion = 4
 
 const contentSchemaSQL = `
 CREATE TABLE content_schema_version (
@@ -17,9 +17,11 @@ CREATE TABLE content_graphs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     catalog_name TEXT NOT NULL,
     name         TEXT NOT NULL,
+    path         TEXT NOT NULL,
     parent_id    INTEGER,
-    FOREIGN KEY (parent_id) REFERENCES content_graphs(id),
-    UNIQUE (catalog_name, name, parent_id)
+    FOREIGN KEY (catalog_name) REFERENCES catalog_metadata(name) ON DELETE CASCADE,
+    FOREIGN KEY (parent_id) REFERENCES content_graphs(id) ON DELETE CASCADE,
+    UNIQUE (catalog_name, path)
 );
 
 CREATE TABLE content_bundles (
@@ -30,6 +32,7 @@ CREATE TABLE content_bundles (
     version      TEXT NOT NULL DEFAULT '',
     release      TEXT NOT NULL DEFAULT '',
     uri          TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (catalog_name) REFERENCES catalog_metadata(name) ON DELETE CASCADE,
     UNIQUE (catalog_name, bundle_id)
 );
 
@@ -37,8 +40,8 @@ CREATE TABLE content_graph_bundles (
     graph_id  INTEGER NOT NULL,
     bundle_id INTEGER NOT NULL,
     PRIMARY KEY (graph_id, bundle_id),
-    FOREIGN KEY (graph_id) REFERENCES content_graphs(id),
-    FOREIGN KEY (bundle_id) REFERENCES content_bundles(id)
+    FOREIGN KEY (graph_id) REFERENCES content_graphs(id) ON DELETE CASCADE,
+    FOREIGN KEY (bundle_id) REFERENCES content_bundles(id) ON DELETE CASCADE
 );
 
 CREATE TABLE content_successors (
@@ -46,9 +49,9 @@ CREATE TABLE content_successors (
     from_bundle_id INTEGER NOT NULL,
     to_bundle_id   INTEGER NOT NULL,
     PRIMARY KEY (graph_id, from_bundle_id, to_bundle_id),
-    FOREIGN KEY (graph_id) REFERENCES content_graphs(id),
-    FOREIGN KEY (from_bundle_id) REFERENCES content_bundles(id),
-    FOREIGN KEY (to_bundle_id) REFERENCES content_bundles(id)
+    FOREIGN KEY (graph_id) REFERENCES content_graphs(id) ON DELETE CASCADE,
+    FOREIGN KEY (from_bundle_id) REFERENCES content_bundles(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_bundle_id) REFERENCES content_bundles(id) ON DELETE CASCADE
 );
 
 CREATE TABLE content_predecessor_ranges (
@@ -56,8 +59,25 @@ CREATE TABLE content_predecessor_ranges (
     bundle_id     INTEGER NOT NULL,
     version_range TEXT NOT NULL,
     PRIMARY KEY (graph_id, bundle_id),
-    FOREIGN KEY (graph_id) REFERENCES content_graphs(id),
-    FOREIGN KEY (bundle_id) REFERENCES content_bundles(id)
+    FOREIGN KEY (graph_id) REFERENCES content_graphs(id) ON DELETE CASCADE,
+    FOREIGN KEY (bundle_id) REFERENCES content_bundles(id) ON DELETE CASCADE
+);
+
+CREATE TABLE content_bundle_properties (
+    catalog_name TEXT NOT NULL,
+    bundle_id    TEXT NOT NULL,
+    key          TEXT NOT NULL,
+    value        JSON NOT NULL CHECK(length(value) > 0),
+    PRIMARY KEY (catalog_name, bundle_id, key),
+    FOREIGN KEY (catalog_name, bundle_id) REFERENCES content_bundles(catalog_name, bundle_id) ON DELETE CASCADE
+);
+
+CREATE TABLE content_graph_properties (
+    graph_id INTEGER NOT NULL,
+    key      TEXT NOT NULL,
+    value    JSON NOT NULL CHECK(length(value) > 0),
+    PRIMARY KEY (graph_id, key),
+    FOREIGN KEY (graph_id) REFERENCES content_graphs(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_content_graphs_parent ON content_graphs(parent_id);
@@ -74,7 +94,23 @@ func CreateContentTables(db *sql.DB) error {
 	return nil
 }
 
-// DropContentTables drops all tables matching the content_% prefix.
+// contentTablesDropOrder lists content tables in reverse dependency order
+// for safe dropping with foreign keys enabled.
+var contentTablesDropOrder = []string{
+	"content_bundle_properties",
+	"content_graph_properties",
+	"content_predecessor_ranges",
+	"content_successors",
+	"content_graph_bundles",
+	"content_graphs",
+	"content_bundles",
+	"content_schema_version",
+}
+
+// DropContentTables drops all content_% tables. It verifies that every
+// content_% table in the database is accounted for in the known list,
+// failing if an unknown table is found. Tables are dropped in reverse
+// dependency order so foreign key constraints are not violated.
 func DropContentTables(db *sql.DB) error {
 	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'content_%'")
 	if err != nil {
@@ -82,19 +118,25 @@ func DropContentTables(db *sql.DB) error {
 	}
 	defer func() { _ = rows.Close() }()
 
-	var tables []string
+	known := make(map[string]bool, len(contentTablesDropOrder))
+	for _, t := range contentTablesDropOrder {
+		known[t] = true
+	}
+
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			return fmt.Errorf("scanning table name: %w", err)
 		}
-		tables = append(tables, name)
+		if !known[name] {
+			return fmt.Errorf("unknown content table %q: update contentTablesDropOrder and ContentSchemaVersion", name)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterating table names: %w", err)
 	}
 
-	for _, table := range tables {
+	for _, table := range contentTablesDropOrder {
 		if _, err := db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %q", table)); err != nil {
 			return fmt.Errorf("dropping table %q: %w", table, err)
 		}

@@ -2,6 +2,7 @@ package fbc
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io/fs"
 
@@ -11,12 +12,17 @@ import (
 
 // Importer imports FBC (File-Based Catalog) content into a store via a Writer.
 type Importer struct {
-	fsys fs.FS
+	fsys      fs.FS
+	olmPkgExt OLMPackageExtension
 }
 
 // NewImporter creates a new FBC importer that reads FBC data from fsys.
-func NewImporter(fsys fs.FS) *Importer {
-	return &Importer{fsys: fsys}
+func NewImporter(fsys fs.FS, opts ...ImporterOption) *Importer {
+	imp := &Importer{fsys: fsys}
+	for _, opt := range opts {
+		opt(imp)
+	}
+	return imp
 }
 
 // Import reads FBC blobs from the filesystem, ingests them into a temporary
@@ -34,7 +40,7 @@ func (i *Importer) Import(ctx context.Context, w catalogv1.Writer) error {
 	}
 	defer func() { _ = internal.CloseTempDB(rawDB, tmpDir) }()
 
-	ingestResult, err := internal.Ingest(ctx, rawDB, i.fsys)
+	ingestResult, err := internal.Ingest(ctx, rawDB, i.fsys, i.olmPkgExt)
 	if err != nil {
 		return fmt.Errorf("ingest: %w", err)
 	}
@@ -52,7 +58,52 @@ func (i *Importer) Import(ctx context.Context, w catalogv1.Writer) error {
 		return fmt.Errorf("normalize: %w", err)
 	}
 
-	return mergePackageErrors(ingestResult.PackageErrors, normalizeResult.PackageErrors)
+	for pkg := range normalizeResult.PackageErrors {
+		skipPackages[pkg] = true
+	}
+
+	var finalizeErrors map[string][]error
+	if i.olmPkgExt != nil {
+		finalizeErrors, err = i.finalize(ctx, rawDB, w, skipPackages)
+		if err != nil {
+			return fmt.Errorf("finalize: %w", err)
+		}
+	}
+
+	return mergePackageErrors(ingestResult.PackageErrors, normalizeResult.PackageErrors, finalizeErrors)
+}
+
+func (i *Importer) finalize(ctx context.Context, rawDB *sql.DB, w catalogv1.Writer, skipPackages map[string]bool) (map[string][]error, error) {
+	rows, err := rawDB.QueryContext(ctx, "SELECT package_name FROM "+internal.TableRawPackage)
+	if err != nil {
+		return nil, fmt.Errorf("listing packages: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var packages []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		packages = append(packages, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	pkgErrors := make(map[string][]error)
+	for _, pkgName := range packages {
+		if skipPackages[pkgName] {
+			continue
+		}
+		pkg := &packageAccessorAdapter{a: internal.NewPackageAccessor(rawDB, pkgName)}
+		pw := internal.NewPropertyWriter(pkgName, w)
+		if err := i.olmPkgExt.FinalizePackage(ctx, pkg, pw); err != nil {
+			pkgErrors[pkgName] = append(pkgErrors[pkgName], fmt.Errorf("finalize: %w", err))
+		}
+	}
+	return pkgErrors, nil
 }
 
 // Compile-time check that *Importer implements catalogv1.Importer.

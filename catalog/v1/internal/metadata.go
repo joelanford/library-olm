@@ -42,10 +42,24 @@ const migration2SQL = `
 ALTER TABLE catalog_metadata ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
 `
 
+const migration3SQL = `
+CREATE TABLE catalog_labels_new (
+    catalog_name TEXT NOT NULL,
+    key          TEXT NOT NULL,
+    value        TEXT NOT NULL,
+    PRIMARY KEY (catalog_name, key),
+    FOREIGN KEY (catalog_name) REFERENCES catalog_metadata(name) ON DELETE CASCADE
+);
+INSERT INTO catalog_labels_new SELECT * FROM catalog_labels;
+DROP TABLE catalog_labels;
+ALTER TABLE catalog_labels_new RENAME TO catalog_labels;
+`
+
 // MetadataMigrations is the ordered list of metadata schema migrations.
 var MetadataMigrations = []Migration{
 	{Version: 1, SQL: migration1SQL},
 	{Version: 2, SQL: migration2SQL},
+	{Version: 3, SQL: migration3SQL},
 }
 
 // RunMetadataMigrations reads the current metadata schema version and applies

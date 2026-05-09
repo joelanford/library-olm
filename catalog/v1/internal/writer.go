@@ -2,10 +2,21 @@ package internal
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	bsemver "github.com/blang/semver/v4"
 )
+
+func graphPath(path []string) (string, error) {
+	for _, seg := range path {
+		if seg == "" || strings.Contains(seg, "/") {
+			return "", fmt.Errorf("invalid graph path segment %q", seg)
+		}
+	}
+	return strings.Join(path, "/"), nil
+}
 
 // ContentWriter writes catalog content into the content tables within a transaction.
 type ContentWriter struct {
@@ -32,43 +43,79 @@ func (w *ContentWriter) InsertBundle(id, pkg, version, release, uri string) erro
 	return nil
 }
 
-// CreateGraph inserts a graph into the content_graphs table and returns its ID.
-func (w *ContentWriter) CreateGraph(name string, parent *int64) (int64, error) {
-	var result sql.Result
-	var err error
-	if parent != nil {
-		result, err = w.tx.Exec(
-			"INSERT INTO content_graphs (catalog_name, name, parent_id) VALUES (?, ?, ?)",
-			w.catalogName, name, *parent,
-		)
-	} else {
-		result, err = w.tx.Exec(
-			"INSERT INTO content_graphs (catalog_name, name, parent_id) VALUES (?, ?, NULL)",
-			w.catalogName, name,
-		)
+func (w *ContentWriter) resolveGraphID(path []string) (int64, error) {
+	if len(path) == 0 {
+		return 0, fmt.Errorf("empty graph path")
 	}
+	p, err := graphPath(path)
 	if err != nil {
-		return 0, fmt.Errorf("creating graph %q: %w", name, err)
+		return 0, err
 	}
-	return result.LastInsertId()
+	var graphID int64
+	err = w.tx.QueryRow(
+		"SELECT id FROM content_graphs WHERE catalog_name = ? AND path = ?",
+		w.catalogName, p,
+	).Scan(&graphID)
+	if err != nil {
+		return 0, fmt.Errorf("resolve graph path %v: %w", path, err)
+	}
+	return graphID, nil
 }
 
-// AddBundleToGraph associates a bundle with a graph by bundle_id string.
-func (w *ContentWriter) AddBundleToGraph(graphID int64, bundleID string) error {
-	_, err := w.tx.Exec(
-		"INSERT INTO content_graph_bundles (graph_id, bundle_id) SELECT ?, id FROM content_bundles WHERE bundle_id = ? AND catalog_name = ?",
-		graphID, bundleID, w.catalogName,
+func (w *ContentWriter) CreateGraph(path []string) error {
+	if len(path) == 0 {
+		return fmt.Errorf("empty graph path")
+	}
+	name := path[len(path)-1]
+	p, err := graphPath(path)
+	if err != nil {
+		return err
+	}
+	if len(path) == 1 {
+		_, err := w.tx.Exec(
+			"INSERT INTO content_graphs (catalog_name, name, path, parent_id) VALUES (?, ?, ?, NULL)",
+			w.catalogName, name, p,
+		)
+		if err != nil {
+			return fmt.Errorf("creating graph %v: %w", path, err)
+		}
+		return nil
+	}
+	parentID, err := w.resolveGraphID(path[:len(path)-1])
+	if err != nil {
+		return fmt.Errorf("creating graph %v: %w", path, err)
+	}
+	_, err = w.tx.Exec(
+		"INSERT INTO content_graphs (catalog_name, name, path, parent_id) VALUES (?, ?, ?, ?)",
+		w.catalogName, name, p, parentID,
 	)
 	if err != nil {
-		return fmt.Errorf("adding bundle %q to graph %d: %w", bundleID, graphID, err)
+		return fmt.Errorf("creating graph %v: %w", path, err)
 	}
 	return nil
 }
 
-// AddEdge adds an explicit successor edge between two bundles in a graph.
-// Duplicate edges are silently ignored.
-func (w *ContentWriter) AddEdge(graphID int64, fromBundleID, toBundleID string) error {
-	_, err := w.tx.Exec(`
+func (w *ContentWriter) AddBundleToGraph(path []string, bundleID string) error {
+	graphID, err := w.resolveGraphID(path)
+	if err != nil {
+		return fmt.Errorf("adding bundle %q to graph %v: %w", bundleID, path, err)
+	}
+	_, err = w.tx.Exec(
+		"INSERT INTO content_graph_bundles (graph_id, bundle_id) SELECT ?, id FROM content_bundles WHERE bundle_id = ? AND catalog_name = ?",
+		graphID, bundleID, w.catalogName,
+	)
+	if err != nil {
+		return fmt.Errorf("adding bundle %q to graph %v: %w", bundleID, path, err)
+	}
+	return nil
+}
+
+func (w *ContentWriter) AddEdge(path []string, fromBundleID, toBundleID string) error {
+	graphID, err := w.resolveGraphID(path)
+	if err != nil {
+		return fmt.Errorf("adding edge %q -> %q in graph %v: %w", fromBundleID, toBundleID, path, err)
+	}
+	_, err = w.tx.Exec(`
 		INSERT OR IGNORE INTO content_successors (graph_id, from_bundle_id, to_bundle_id)
 		VALUES (?,
 			(SELECT id FROM content_bundles WHERE bundle_id = ? AND catalog_name = ?),
@@ -76,38 +123,71 @@ func (w *ContentWriter) AddEdge(graphID int64, fromBundleID, toBundleID string) 
 		graphID, fromBundleID, w.catalogName, toBundleID, w.catalogName,
 	)
 	if err != nil {
-		return fmt.Errorf("adding edge %q -> %q in graph %d: %w", fromBundleID, toBundleID, graphID, err)
+		return fmt.Errorf("adding edge %q -> %q in graph %v: %w", fromBundleID, toBundleID, path, err)
 	}
 	return nil
 }
 
-func (w *ContentWriter) AddPredecessorRange(graphID int64, bundleID, versionRange string) error {
+func (w *ContentWriter) AddPredecessorRange(path []string, bundleID, versionRange string) error {
 	if _, err := bsemver.ParseRange(versionRange); err != nil {
 		return fmt.Errorf("invalid predecessor range %q for bundle %q: %w", versionRange, bundleID, err)
 	}
-	_, err := w.tx.Exec(`
+	graphID, err := w.resolveGraphID(path)
+	if err != nil {
+		return fmt.Errorf("adding predecessor range for bundle %q in graph %v: %w", bundleID, path, err)
+	}
+	_, err = w.tx.Exec(`
 		INSERT INTO content_predecessor_ranges (graph_id, bundle_id, version_range)
 		VALUES (?, (SELECT id FROM content_bundles WHERE bundle_id = ? AND catalog_name = ?), ?)`,
 		graphID, bundleID, w.catalogName, versionRange,
 	)
 	if err != nil {
-		return fmt.Errorf("adding predecessor range for bundle %q in graph %d: %w", bundleID, graphID, err)
+		return fmt.Errorf("adding predecessor range for bundle %q in graph %v: %w", bundleID, path, err)
 	}
 	return nil
 }
 
-// DeleteCatalogContent deletes all content rows for a catalog name,
-// respecting foreign key ordering.
+func (w *ContentWriter) SetBundleProperty(bundleID, key string, val any) error {
+	data, err := json.Marshal(val)
+	if err != nil {
+		return fmt.Errorf("marshal bundle property %q on %q: %w", key, bundleID, err)
+	}
+	_, err = w.tx.Exec(
+		"INSERT OR REPLACE INTO content_bundle_properties (catalog_name, bundle_id, key, value) VALUES (?, ?, ?, ?)",
+		w.catalogName, bundleID, key, string(data),
+	)
+	if err != nil {
+		return fmt.Errorf("setting bundle property %q on %q: %w", key, bundleID, err)
+	}
+	return nil
+}
+
+func (w *ContentWriter) SetGraphProperty(path []string, key string, val any) error {
+	data, err := json.Marshal(val)
+	if err != nil {
+		return fmt.Errorf("marshal graph property %q on path %v: %w", key, path, err)
+	}
+	graphID, err := w.resolveGraphID(path)
+	if err != nil {
+		return err
+	}
+	_, err = w.tx.Exec(
+		"INSERT OR REPLACE INTO content_graph_properties (graph_id, key, value) VALUES (?, ?, ?)",
+		graphID, key, string(data),
+	)
+	if err != nil {
+		return fmt.Errorf("setting graph property %q on path %v: %w", key, path, err)
+	}
+	return nil
+}
+
+// DeleteCatalogContent deletes all content rows for a catalog name.
+// ON DELETE CASCADE on child tables handles cleanup automatically.
 func DeleteCatalogContent(tx *sql.Tx, catalogName string) error {
-	// Delete in FK-safe order: predecessor_ranges, successors, graph_bundles, graphs, bundles
-	stmts := []string{
-		"DELETE FROM content_predecessor_ranges WHERE graph_id IN (SELECT id FROM content_graphs WHERE catalog_name = ?)",
-		"DELETE FROM content_successors WHERE graph_id IN (SELECT id FROM content_graphs WHERE catalog_name = ?)",
-		"DELETE FROM content_graph_bundles WHERE graph_id IN (SELECT id FROM content_graphs WHERE catalog_name = ?)",
+	for _, stmt := range []string{
 		"DELETE FROM content_graphs WHERE catalog_name = ?",
 		"DELETE FROM content_bundles WHERE catalog_name = ?",
-	}
-	for _, stmt := range stmts {
+	} {
 		if _, err := tx.Exec(stmt, catalogName); err != nil {
 			return fmt.Errorf("deleting catalog content for %q: %w", catalogName, err)
 		}
