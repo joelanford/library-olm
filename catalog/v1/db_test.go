@@ -24,6 +24,8 @@ type testImporter struct {
 	fn func(ctx context.Context, w catalogv1.Writer) error
 }
 
+const nestedQueryTestTimeout = 3 * time.Second
+
 func (t *testImporter) Import(ctx context.Context, w catalogv1.Writer) error {
 	return t.fn(ctx, w)
 }
@@ -366,7 +368,7 @@ func TestSet_WithContent(t *testing.T) {
 func TestIterators_AllowNestedQueries(t *testing.T) {
 	store, cleanup := newTempStore(t)
 	defer cleanup()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), nestedQueryTestTimeout)
 	defer cancel()
 
 	cat, err := store.Set(ctx, "cat",
@@ -416,9 +418,10 @@ func TestIterators_AllowNestedQueries(t *testing.T) {
 			slices.Sort(directBundleIDs)
 			assert.Equal(t, []string{"pkg.v1.0.0", "pkg.v2.0.0"}, directBundleIDs)
 
-			directSuccessorIDs := collectSuccessorIDs(t, g.Successors(ctx, testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")))
+			v1Bundle := testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")
+			directSuccessorIDs := collectSuccessorIDs(t, g.Successors(ctx, v1Bundle))
 			assert.Equal(t, []string{"pkg.v2.0.0"}, directSuccessorIDs)
-			for successor, err := range g.Successors(ctx, testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")) {
+			for successor, err := range g.Successors(ctx, v1Bundle) {
 				require.NoError(t, err)
 				successorProp, err := successor.Property(ctx, "orb.displayName")
 				require.NoError(t, err)
@@ -428,9 +431,10 @@ func TestIterators_AllowNestedQueries(t *testing.T) {
 		slices.Sort(graphNames)
 		assert.Equal(t, []string{"fast", "stable"}, graphNames)
 
-		compositeSuccessorIDs := collectSuccessorIDs(t, pkg.Successors(ctx, testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")))
+		v1Bundle := testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")
+		compositeSuccessorIDs := collectSuccessorIDs(t, pkg.Successors(ctx, v1Bundle))
 		assert.Equal(t, []string{"pkg.v2.0.0"}, compositeSuccessorIDs)
-		for successor, err := range pkg.Successors(ctx, testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")) {
+		for successor, err := range pkg.Successors(ctx, v1Bundle) {
 			require.NoError(t, err)
 			successorProp, err := successor.Property(ctx, "orb.displayName")
 			require.NoError(t, err)
