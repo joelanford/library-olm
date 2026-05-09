@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	bsemver "github.com/blang/semver/v4"
 	"github.com/stretchr/testify/assert"
@@ -42,6 +43,44 @@ func simpleImporter(pkg, version, channel string) catalogv1.Importer {
 			return err
 		}
 		return w.AddBundleToGraph([]string{pkg, channel}, bundleID)
+	}}
+}
+
+func nestedQueryImporter() catalogv1.Importer {
+	return &testImporter{fn: func(_ context.Context, w catalogv1.Writer) error {
+		for _, version := range []string{"1.0.0", "2.0.0"} {
+			bundleID := "pkg.v" + version
+			if err := w.InsertBundle(bundleID, "pkg", version, "", "docker://example.com/pkg:v"+version); err != nil {
+				return err
+			}
+			if err := w.SetBundleProperty(bundleID, "orb.displayName", bundleID+" display"); err != nil {
+				return err
+			}
+		}
+		if err := w.CreateGraph([]string{"pkg"}); err != nil {
+			return err
+		}
+		if err := w.SetGraphProperty([]string{"pkg"}, "orb.displayName", "pkg display"); err != nil {
+			return err
+		}
+		for _, channel := range []string{"stable", "fast"} {
+			if err := w.CreateGraph([]string{"pkg", channel}); err != nil {
+				return err
+			}
+			if err := w.SetGraphProperty([]string{"pkg", channel}, "orb.displayName", channel+" display"); err != nil {
+				return err
+			}
+			if err := w.AddBundleToGraph([]string{"pkg", channel}, "pkg.v1.0.0"); err != nil {
+				return err
+			}
+			if err := w.AddBundleToGraph([]string{"pkg", channel}, "pkg.v2.0.0"); err != nil {
+				return err
+			}
+			if err := w.AddEdge([]string{"pkg", channel}, "pkg.v1.0.0", "pkg.v2.0.0"); err != nil {
+				return err
+			}
+		}
+		return nil
 	}}
 }
 
@@ -322,6 +361,83 @@ func TestSet_WithContent(t *testing.T) {
 		pkgNames = append(pkgNames, pkg.Name())
 	}
 	assert.Equal(t, []string{"test-pkg"}, pkgNames)
+}
+
+func TestIterators_AllowNestedQueries(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	cat, err := store.Set(ctx, "cat",
+		catalogv1.WithURI("test://"),
+		catalogv1.WithContent(nestedQueryImporter(), "digest1"),
+	)
+	require.NoError(t, err)
+
+	var packageNames []string
+	for pkg, err := range cat.ListPackages(ctx) {
+		require.NoError(t, err)
+		packageNames = append(packageNames, pkg.Name())
+
+		pkgProp, err := pkg.Property(ctx, "orb.displayName")
+		require.NoError(t, err)
+		assert.JSONEq(t, `"pkg display"`, string(pkgProp))
+
+		var pkgBundleIDs []string
+		for b, err := range pkg.ListBundles(ctx) {
+			require.NoError(t, err)
+			pkgBundleIDs = append(pkgBundleIDs, string(b.ID()))
+			bundleProp, err := b.Property(ctx, "orb.displayName")
+			require.NoError(t, err)
+			assert.NotEmpty(t, bundleProp)
+		}
+		slices.Sort(pkgBundleIDs)
+		assert.Equal(t, []string{"pkg.v1.0.0", "pkg.v2.0.0"}, pkgBundleIDs)
+
+		composite := pkg.(catalogv1.CompositeUpdateGraph)
+		var graphNames []string
+		for g, err := range composite.ListGraphs(ctx) {
+			require.NoError(t, err)
+			graphNames = append(graphNames, g.Name())
+
+			graphProp, err := g.Property(ctx, "orb.displayName")
+			require.NoError(t, err)
+			assert.NotEmpty(t, graphProp)
+
+			var directBundleIDs []string
+			for b, err := range g.ListBundles(ctx) {
+				require.NoError(t, err)
+				directBundleIDs = append(directBundleIDs, string(b.ID()))
+				bundleProp, err := b.Property(ctx, "orb.displayName")
+				require.NoError(t, err)
+				assert.NotEmpty(t, bundleProp)
+			}
+			slices.Sort(directBundleIDs)
+			assert.Equal(t, []string{"pkg.v1.0.0", "pkg.v2.0.0"}, directBundleIDs)
+
+			directSuccessorIDs := collectSuccessorIDs(t, g.Successors(ctx, testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")))
+			assert.Equal(t, []string{"pkg.v2.0.0"}, directSuccessorIDs)
+			for successor, err := range g.Successors(ctx, testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")) {
+				require.NoError(t, err)
+				successorProp, err := successor.Property(ctx, "orb.displayName")
+				require.NoError(t, err)
+				assert.NotEmpty(t, successorProp)
+			}
+		}
+		slices.Sort(graphNames)
+		assert.Equal(t, []string{"fast", "stable"}, graphNames)
+
+		compositeSuccessorIDs := collectSuccessorIDs(t, pkg.Successors(ctx, testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")))
+		assert.Equal(t, []string{"pkg.v2.0.0"}, compositeSuccessorIDs)
+		for successor, err := range pkg.Successors(ctx, testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")) {
+			require.NoError(t, err)
+			successorProp, err := successor.Property(ctx, "orb.displayName")
+			require.NoError(t, err)
+			assert.NotEmpty(t, successorProp)
+		}
+	}
+	assert.Equal(t, []string{"pkg"}, packageNames)
 }
 
 func TestSet_WithContent_Digest(t *testing.T) {

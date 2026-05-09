@@ -69,30 +69,17 @@ type CatalogQuery struct {
 // (packages) for this catalog.
 func (c *CatalogQuery) ListPackages(ctx context.Context) iter.Seq2[*CompositeUpdateGraphQuery, error] {
 	return func(yield func(*CompositeUpdateGraphQuery, error) bool) {
-		rows, err := c.DB.QueryContext(ctx,
+		results, err := collectCompositeUpdateGraphResults(ctx, c.DB, c.CatalogName,
 			"SELECT id, name FROM content_graphs WHERE parent_id IS NULL AND catalog_name = ? ORDER BY name",
-			c.CatalogName,
-		)
+			c.CatalogName)
 		if err != nil {
 			yield(nil, err)
 			return
 		}
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			var id int64
-			var name string
-			if err := rows.Scan(&id, &name); err != nil {
-				if !yield(nil, err) {
-					return
-				}
-				continue
-			}
-			if !yield(&CompositeUpdateGraphQuery{DB: c.DB, CatalogName: c.CatalogName, GraphID: id, GraphName: name}, nil) {
+		for _, result := range results {
+			if !yield(result.graph, result.err) {
 				return
 			}
-		}
-		if err := rows.Err(); err != nil {
-			yield(nil, err)
 		}
 	}
 }
@@ -139,29 +126,17 @@ func (g *CompositeUpdateGraphQuery) Successors(ctx context.Context, from bundlev
 // ListGraphs returns an iterator over the child update graphs.
 func (g *CompositeUpdateGraphQuery) ListGraphs(ctx context.Context) iter.Seq2[*UpdateGraphQuery, error] {
 	return func(yield func(*UpdateGraphQuery, error) bool) {
-		rows, err := g.DB.QueryContext(ctx,
-			"SELECT id, name FROM content_graphs WHERE parent_id = ? ORDER BY name", g.GraphID,
-		)
+		results, err := collectUpdateGraphResults(ctx, g.DB, g.CatalogName,
+			"SELECT id, name FROM content_graphs WHERE parent_id = ? ORDER BY name",
+			g.GraphID)
 		if err != nil {
 			yield(nil, err)
 			return
 		}
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			var id int64
-			var name string
-			if err := rows.Scan(&id, &name); err != nil {
-				if !yield(nil, err) {
-					return
-				}
-				continue
-			}
-			if !yield(&UpdateGraphQuery{DB: g.DB, CatalogName: g.CatalogName, GraphID: id, GraphName: name}, nil) {
+		for _, result := range results {
+			if !yield(result.graph, result.err) {
 				return
 			}
-		}
-		if err := rows.Err(); err != nil {
-			yield(nil, err)
 		}
 	}
 }
@@ -218,7 +193,7 @@ func (g *UpdateGraphQuery) Successors(ctx context.Context, from bundlev1.BundleI
 
 func queryBundlesDirect(ctx context.Context, db *sql.DB, catalogName string, graphID int64) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
-		rows, err := db.QueryContext(ctx, `
+		results, err := collectBundleResults(ctx, db, catalogName, `
 			SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri
 			FROM content_graph_bundles gb
 			JOIN content_bundles b ON b.id = gb.bundle_id
@@ -228,14 +203,13 @@ func queryBundlesDirect(ctx context.Context, db *sql.DB, catalogName string, gra
 			yield(nil, err)
 			return
 		}
-		defer func() { _ = rows.Close() }()
-		yieldBundleRows(db, catalogName, rows, yield)
+		yieldBundleResults(results, yield)
 	}
 }
 
 func queryBundlesDescendant(ctx context.Context, db *sql.DB, catalogName string, graphID int64) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
-		rows, err := db.QueryContext(ctx, `
+		results, err := collectBundleResults(ctx, db, catalogName, `
 			WITH RECURSIVE descendants(id) AS (
 				SELECT id FROM content_graphs WHERE parent_id = ?
 				UNION ALL
@@ -250,8 +224,7 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, catalogName string,
 			yield(nil, err)
 			return
 		}
-		defer func() { _ = rows.Close() }()
-		yieldBundleRows(db, catalogName, rows, yield)
+		yieldBundleResults(results, yield)
 	}
 }
 
@@ -302,60 +275,67 @@ func querySuccessorsCollected(
 	version bsemver.Version,
 ) iter.Seq2[bundlev1.Bundle, error] {
 	return func(yield func(bundlev1.Bundle, error) bool) {
-		seen, ok := yieldExplicitSuccessors(ctx, db, catalogName, explicitSQL, explicitArgs, yield)
-		if !ok {
+		results, err := collectSuccessorResults(ctx, db, catalogName, explicitSQL, explicitArgs, rangeSQL, rangeArgs, version)
+		if err != nil {
+			yield(nil, err)
 			return
 		}
-		yieldRangeSuccessors(ctx, db, catalogName, rangeSQL, rangeArgs, version, seen, yield)
+		yieldBundleResults(results, yield)
 	}
 }
 
-func yieldExplicitSuccessors(ctx context.Context, db *sql.DB, catalogName string, query string, args []any, yield func(bundlev1.Bundle, error) bool) (map[string]bool, bool) {
+func collectSuccessorResults(
+	ctx context.Context, db *sql.DB, catalogName string,
+	explicitSQL string, explicitArgs []any,
+	rangeSQL string, rangeArgs []any,
+	version bsemver.Version,
+) ([]bundleResult, error) {
 	seen := make(map[string]bool)
+	explicitResults, err := collectExplicitSuccessorResults(ctx, db, catalogName, explicitSQL, explicitArgs, seen)
+	if err != nil {
+		return nil, err
+	}
+	rangeResults, err := collectRangeSuccessorResults(ctx, db, catalogName, rangeSQL, rangeArgs, version, seen)
+	if err != nil {
+		return nil, err
+	}
+	return append(explicitResults, rangeResults...), nil
+}
+
+func collectExplicitSuccessorResults(ctx context.Context, db *sql.DB, catalogName string, query string, args []any, seen map[string]bool) ([]bundleResult, error) {
+	var results []bundleResult
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return seen, yield(nil, err)
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var id, packageName, versionStr, releaseStr, uri string
 		if err := rows.Scan(&id, &packageName, &versionStr, &releaseStr, &uri); err != nil {
-			if !yield(nil, err) {
-				return seen, false
-			}
+			results = append(results, bundleResult{err: err})
 			continue
 		}
 		seen[id] = true
 		b, err := parseBundleRow(db, catalogName, id, packageName, versionStr, releaseStr, uri)
-		if err != nil {
-			if !yield(nil, err) {
-				return seen, false
-			}
-			continue
-		}
-		if !yield(b, nil) {
-			return seen, false
-		}
+		results = append(results, bundleResult{bundle: b, err: err})
 	}
 	if err := rows.Err(); err != nil {
-		return seen, yield(nil, err)
+		results = append(results, bundleResult{err: err})
 	}
-	return seen, true
+	return results, nil
 }
 
-func yieldRangeSuccessors(ctx context.Context, db *sql.DB, catalogName string, query string, args []any, version bsemver.Version, seen map[string]bool, yield func(bundlev1.Bundle, error) bool) {
+func collectRangeSuccessorResults(ctx context.Context, db *sql.DB, catalogName string, query string, args []any, version bsemver.Version, seen map[string]bool) ([]bundleResult, error) {
+	var results []bundleResult
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
-		yield(nil, err)
-		return
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var bid, packageName, versionStr, releaseStr, uri, rangeStr string
 		if err := rows.Scan(&bid, &packageName, &versionStr, &releaseStr, &uri, &rangeStr); err != nil {
-			if !yield(nil, err) {
-				return
-			}
+			results = append(results, bundleResult{err: err})
 			continue
 		}
 		if seen[bid] {
@@ -363,9 +343,7 @@ func yieldRangeSuccessors(ctx context.Context, db *sql.DB, catalogName string, q
 		}
 		rng, err := bsemver.ParseRange(rangeStr)
 		if err != nil {
-			if !yield(nil, fmt.Errorf("parse predecessor range %q: %w", rangeStr, err)) {
-				return
-			}
+			results = append(results, bundleResult{err: fmt.Errorf("parse predecessor range %q: %w", rangeStr, err)})
 			continue
 		}
 		if !rng(version) {
@@ -373,18 +351,104 @@ func yieldRangeSuccessors(ctx context.Context, db *sql.DB, catalogName string, q
 		}
 		seen[bid] = true
 		b, err := parseBundleRow(db, catalogName, bid, packageName, versionStr, releaseStr, uri)
-		if err != nil {
-			if !yield(nil, err) {
-				return
-			}
-			continue
-		}
-		if !yield(b, nil) {
-			return
-		}
+		results = append(results, bundleResult{bundle: b, err: err})
 	}
 	if err := rows.Err(); err != nil {
-		yield(nil, err)
+		results = append(results, bundleResult{err: err})
+	}
+	return results, nil
+}
+
+type compositeUpdateGraphResult struct {
+	graph *CompositeUpdateGraphQuery
+	err   error
+}
+
+func collectCompositeUpdateGraphResults(ctx context.Context, db *sql.DB, catalogName, query string, args ...any) ([]compositeUpdateGraphResult, error) {
+	var results []compositeUpdateGraphResult
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			results = append(results, compositeUpdateGraphResult{err: err})
+			continue
+		}
+		results = append(results, compositeUpdateGraphResult{
+			graph: &CompositeUpdateGraphQuery{DB: db, CatalogName: catalogName, GraphID: id, GraphName: name},
+		})
+	}
+	if err := rows.Err(); err != nil {
+		results = append(results, compositeUpdateGraphResult{err: err})
+	}
+	return results, nil
+}
+
+type updateGraphResult struct {
+	graph *UpdateGraphQuery
+	err   error
+}
+
+func collectUpdateGraphResults(ctx context.Context, db *sql.DB, catalogName, query string, args ...any) ([]updateGraphResult, error) {
+	var results []updateGraphResult
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			results = append(results, updateGraphResult{err: err})
+			continue
+		}
+		results = append(results, updateGraphResult{
+			graph: &UpdateGraphQuery{DB: db, CatalogName: catalogName, GraphID: id, GraphName: name},
+		})
+	}
+	if err := rows.Err(); err != nil {
+		results = append(results, updateGraphResult{err: err})
+	}
+	return results, nil
+}
+
+type bundleResult struct {
+	bundle bundlev1.Bundle
+	err    error
+}
+
+func collectBundleResults(ctx context.Context, db *sql.DB, catalogName, query string, args ...any) ([]bundleResult, error) {
+	var results []bundleResult
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id, packageName, versionStr, releaseStr, uri string
+		if err := rows.Scan(&id, &packageName, &versionStr, &releaseStr, &uri); err != nil {
+			results = append(results, bundleResult{err: err})
+			continue
+		}
+		b, err := parseBundleRow(db, catalogName, id, packageName, versionStr, releaseStr, uri)
+		results = append(results, bundleResult{bundle: b, err: err})
+	}
+	if err := rows.Err(); err != nil {
+		results = append(results, bundleResult{err: err})
+	}
+	return results, nil
+}
+
+func yieldBundleResults(results []bundleResult, yield func(bundlev1.Bundle, error) bool) {
+	for _, result := range results {
+		if !yield(result.bundle, result.err) {
+			return
+		}
 	}
 }
 
@@ -406,29 +470,4 @@ func parseBundleRow(db *sql.DB, catalogName, id, packageName, versionStr, releas
 		Release:     bundlev1.MustParseRelease(releaseStr),
 		BundleURI:   uri,
 	}, nil
-}
-
-func yieldBundleRows(db *sql.DB, catalogName string, rows *sql.Rows, yield func(bundlev1.Bundle, error) bool) {
-	for rows.Next() {
-		var id, packageName, versionStr, releaseStr, uri string
-		if err := rows.Scan(&id, &packageName, &versionStr, &releaseStr, &uri); err != nil {
-			if !yield(nil, err) {
-				return
-			}
-			continue
-		}
-		b, err := parseBundleRow(db, catalogName, id, packageName, versionStr, releaseStr, uri)
-		if err != nil {
-			if !yield(nil, err) {
-				return
-			}
-			continue
-		}
-		if !yield(b, nil) {
-			return
-		}
-	}
-	if err := rows.Err(); err != nil {
-		yield(nil, err)
-	}
 }
