@@ -1,29 +1,117 @@
 ---
-status: idea
+status: in-progress
 ---
-# Separate Reader/Writer Connection Pools for Content DB
+# Separate Reader/Writer Connection Pools
 
-## Problem
+## Summary
 
-Both the content DB and staging DB use `MaxOpenConns(1)` to serialize access. This prevents nested read cursors — any code that opens a second query while a first is still open will deadlock waiting for the single connection.
+Split both the content DB and the FBC importer's staging DB from a single `*sql.DB` with
+`MaxOpenConns(1)` into separate reader and writer pools sharing the same file. The writer pool
+keeps `MaxOpenConns(1)` for write serialization. The reader pool allows unlimited concurrent
+connections. WAL mode makes this safe: readers never block writers and vice versa.
 
-This affects two areas today:
+This eliminates the nested-query deadlock that today forces all iterators to pre-collect results
+into slices before yielding. With multiple reader connections, iterators can stream rows directly,
+reducing memory overhead for large catalogs and enabling lazy evaluation.
 
-1. **Staging DB accessors**: `PackageAccessor.Bundles()`, `Channels()`, `Deprecations()`, `Others()`, and `channelAccessor.Entries()` previously streamed from live cursors. Nesting any of these (e.g., iterating bundles while also iterating channels in `FinalizePackage`) deadlocked. The current workaround is pre-collecting results into slices before yielding, which works but increases memory usage and prevents lazy evaluation.
+## Design
 
-2. **Content DB queries**: `BundleRow.Property()` and graph `Property()` queries execute additional reads against the same content DB. Calling them inside streaming iterators (`ListPackages`, `ListGraphs`, `ListBundles`, `Successors`) deadlocked when those iterators held open cursors. The current workaround is pre-collecting those iterator results before yielding.
+### The two databases
 
-## Idea
+There are two separate SQLite databases involved:
 
-Open the same DB file twice — one `*sql.DB` with `MaxOpenConns(1)` for writes (`Set`, `Delete`), and another with unlimited connections for reads (`Get`, `List`, all query methods including `Bundle.Property()` and `UpdateGraph.Property()`). WAL mode makes this safe: readers don't block writers and vice versa.
+**Content DB** (`catalog/v1/`) — the persistent, long-lived database opened via `OpenStore`.
+It stores catalog metadata (name, URI, digest, priority, labels) and normalized content
+(bundles, graphs, successor edges, properties). The `Store` interface reads and writes this
+database. Query types (`CatalogQuery`, `UpdateGraphQuery`, `BundleRow`, etc.) read from it.
 
-This would let callers freely nest read iterators and call `Property()` inside iteration loops without deadlocking, while keeping write serialization simple.
+**FBC staging DB** (`catalog/fbc/internal/`) — a temporary SQLite database that the FBC
+importer creates to stage raw FBC data during import. This is an implementation detail of the
+FBC importer, not a general catalog concept — other importers could stage data differently or
+not at all. During ingest, raw FBC blobs (packages, channels, bundles, deprecations) are
+written into staging tables. During normalize and finalize, `PackageAccessor` reads from
+the staging tables and the `OLMPackageHandler` transforms the raw data into normalized
+content, writing results through a `catalogv1.Writer` that targets the content DB. The
+staging DB is deleted after import completes.
 
-Once implemented, the pre-collection pattern in both staging DB accessors (`collectChannels`, etc.) and content DB query iterators can be replaced with direct streaming, reducing memory overhead for large catalogs.
+Both databases today use `MaxOpenConns(1)`, which prevents nested read cursors and forces
+pre-collection workarounds. Both get the same reader/writer split.
 
-## Notes
+### Two-pool pattern
 
-- `BundleRow`, `UpdateGraphQuery`, etc. would hold a reference to the reader DB instead of the writer DB
-- The staging DB could also benefit — remove `MaxOpenConns(1)` and let accessor iterators stream freely
-- `modernc.org/sqlite` has had historical issues with `busy_timeout` and concurrent access — test thoroughly
-- `BEGIN IMMEDIATE` may be needed for write transactions to avoid the deferred-transaction upgrade problem
+For each database, open the same file twice — one `*sql.DB` for writes, one for reads:
+
+| Pool | MaxOpenConns | Used by |
+|------|-------------|---------|
+| Writer | 1 | Content: `Set`, `Delete`, migrations, schema rebuilds. Staging: ingest |
+| Reader | unlimited | Content: `Get`, `List`, `Select`, all query/iterator methods, `Property()`. Staging: normalize, finalize |
+
+WAL mode (already enabled) guarantees readers and writers don't block each other. The writer
+pool's single-connection limit serializes all write transactions. The reader pool's unlimited
+connections allow nested iteration and `Property()` calls inside iterator loops.
+
+### Per-connection pragma initialization
+
+With `MaxOpenConns(1)`, setting pragmas once via `Exec` works because there's only one connection.
+The reader pool creates connections on demand, so pragmas must be set per-connection. Both pools
+use DSN `_pragma` parameters for consistency. The `_pragma` DSN parameter is supported by
+`modernc.org/sqlite`:
+
+Reader pool DSN:
+```
+file:<path>?mode=ro&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)
+```
+
+Writer pool DSN:
+```
+file:<path>?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)
+```
+
+The reader pool's `mode=ro` flag enforces read-only access at the SQLite level — any accidental
+write through the reader pool returns an error rather than silently succeeding. The writer pool
+omits `mode=ro` to allow writes.
+
+The path must be properly escaped if it contains URI-special characters (`?`, `#`, `%`). In
+practice, database file paths rarely contain these characters.
+
+### Content DB changes (`catalog/v1/`)
+
+The `db` struct gains a second field:
+
+```go
+type db struct {
+    writerDB *sql.DB
+    readerDB *sql.DB
+}
+```
+
+`OpenStore` opens the file twice. Writes (`Set`, `Delete`, migrations, schema rebuilds) use
+`writerDB`. Reads (`Get`, `List`, query construction) use `readerDB`. Startup schema checks
+run on the writer pool since they execute before the reader pool is needed and may trigger
+a rebuild. `Close` closes both.
+
+All internal query types (`CatalogQuery`, `CompositeUpdateGraphQuery`, `UpdateGraphQuery`,
+`BundleRow`) already store a `DB *sql.DB` field used only for reads. After the split, they
+receive `readerDB` instead of the single pool — no structural change to these types.
+
+With the reader pool in place, all `collect*` pre-collection functions in `query.go` can be
+replaced with direct streaming iterators. The `db.List()` method in `db.go` can also stream
+catalog metadata rows directly instead of pre-collecting.
+
+### FBC staging DB changes (`catalog/fbc/`)
+
+`OpenTempDB` returns both a writer and reader pool. The importer passes the writer to `Ingest`
+and the reader to `Normalize` and `finalize`. `CloseTempDB` closes both pools.
+
+`PackageAccessor` and `channelAccessor` store the reader pool. All `collect*` pre-collection
+functions in `accessor.go` can be replaced with direct streaming.
+
+### Successor query streaming
+
+The successor queries (`collectSuccessorResults`) union explicit edges with range-based matches
+and deduplicate by bundle ID. With streaming, this becomes:
+
+1. Stream explicit successor query, yield results, track seen IDs in a map
+2. Stream range successor query, skip already-seen IDs, yield remaining results
+
+Both queries use the reader pool and don't conflict. The `seen` map lives in the iterator closure.
