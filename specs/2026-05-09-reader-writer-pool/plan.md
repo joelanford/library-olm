@@ -27,10 +27,13 @@ to verify no regressions before changing iteration behavior.
 Replace pre-collection with direct streaming in the content DB query layer.
 
 - **`catalog/v1/internal/query.go`:**
-  - `CatalogQuery.ListPackages`: stream rows directly, construct `CompositeUpdateGraphQuery`
-    per row, yield immediately (remove `collectCompositeUpdateGraphResults`)
-  - `CompositeUpdateGraphQuery.ListGraphs`: stream rows directly, construct `UpdateGraphQuery`
-    per row, yield immediately (remove `collectUpdateGraphResults`)
+  - Add `GraphNode` type with `DB`, `CatalogName`, `ID`, `Name`, `Path`, `HasChildren` fields
+  - Add `queryGraphNodes` helper that builds a single parameterized SQL query from optional
+    `parentID` (nil = top-level, non-nil = children) and `name` (empty = list, non-empty = get)
+    parameters, with `parentPath` for hierarchical error context
+  - `CatalogQuery.ListPackages` / `GetPackage`: delegate to `queryGraphNodes` with `parentID=nil`
+  - `CompositeUpdateGraphQuery.ListGraphs` / `GetGraph`: delegate to `queryGraphNodes` with
+    `parentID=&graphID`
   - `queryBundlesDirect` / `queryBundlesDescendant`: stream rows directly, parse and yield each
     `BundleRow` immediately (remove `collectBundleResults`)
   - `querySuccessorsCollected`: stream explicit successors first (yield immediately, track seen
@@ -39,8 +42,26 @@ Replace pre-collection with direct streaming in the content DB query layer.
   - Remove intermediate types: `bundleResult`, `compositeUpdateGraphResult`,
     `updateGraphResult`, `yieldBundleResults`
 - **`catalog/v1/db.go`:**
+  - Add `wrapGraphNode` / `wrapGraphNodes` to convert `GraphNode` to `UpdateGraph` based on
+    `HasChildren`, wrapping as `compositeUpdateGraphWrapper` or `*UpdateGraphQuery`
+  - Simplify `ListPackages`, `GetPackage`, `ListGraphs`, `GetGraph` wrappers to use
+    `wrapGraphNode` / `wrapGraphNodes`
   - `db.List()`: stream catalog metadata rows directly, call `queryLabels` per row inside the
     loop (safe with multiple reader connections)
+- Run `make ci`
+
+## 2a. TOCTOU fix and query helpers
+
+Fix `Set` to read catalog metadata within the write transaction before committing.
+
+- **`catalog/v1/db.go`:**
+  - Add `querier` interface (satisfied by `*sql.DB` and `*sql.Tx`) with `Query` and `QueryRow`
+  - Extract `queryLabels(q querier, name)` standalone function (replaces `d.queryLabels` method)
+  - Extract `getCatalog(q querier, readerDB, name)` helper shared by `Set` (via `tx`) and `Get`
+    (via `readerDB`)
+  - `Set`: call `getCatalog(tx, d.readerDB, name)` before `tx.Commit()` to return data
+    consistent with what was written
+  - `Get`: one-liner delegating to `getCatalog(d.readerDB, d.readerDB, name)`
 - Run `make ci`
 
 ## 3. FBC staging DB reader/writer split

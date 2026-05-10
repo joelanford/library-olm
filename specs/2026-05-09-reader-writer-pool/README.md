@@ -1,5 +1,6 @@
 ---
-status: in-progress
+status: pr-submitted
+pr: https://github.com/joelanford/library-olm/pull/9
 ---
 # Separate Reader/Writer Connection Pools
 
@@ -97,6 +98,29 @@ receive `readerDB` instead of the single pool — no structural change to these 
 With the reader pool in place, all `collect*` pre-collection functions in `query.go` can be
 replaced with direct streaming iterators. The `db.List()` method in `db.go` can also stream
 catalog metadata rows directly instead of pre-collecting.
+
+### Unified graph node listing
+
+`ListPackages`, `GetPackage`, `ListGraphs`, and `GetGraph` all query the same
+`content_graphs` table with different WHERE conditions. A single `queryGraphNodes` helper
+builds the SQL from optional `parentID` and `name` parameters, returning `GraphNode` values
+that carry `HasChildren` (via an `EXISTS` subquery) and `Path` (the full hierarchy of graph
+names from root to node). The `db.go` layer wraps each `GraphNode` as either a
+`compositeUpdateGraphWrapper` or `*UpdateGraphQuery` based on `HasChildren`.
+
+This removes the prior assumptions that packages are always composite and child graphs are
+always leaf nodes — both can be either.
+
+### TOCTOU fix in Set
+
+`Set` reads catalog metadata and labels from the write transaction before committing, then
+returns the result. Previously it committed first and called `Get` via the reader pool,
+which could return a stale or inconsistent result if another writer modified the catalog
+between commit and read.
+
+A `querier` interface (satisfied by both `*sql.DB` and `*sql.Tx`) enables shared
+`getCatalog` and `queryLabels` helpers used by both `Set` (via `tx`) and `Get` (via
+`readerDB`).
 
 ### FBC staging DB changes (`catalog/fbc/`)
 

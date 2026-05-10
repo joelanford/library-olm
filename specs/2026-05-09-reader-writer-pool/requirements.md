@@ -12,11 +12,15 @@
 - FBC staging DB accessor iterators (`Bundles`, `Channels`, `Deprecations`, `Others`, `Entries`) stream rows directly instead of pre-collecting
 - `BundleRow.Property()` and graph `Property()` work correctly when called inside streaming iterators
 - `Close` / `CloseTempDB` close both pools
+- `ListPackages`, `GetPackage`, `ListGraphs`, `GetGraph` use a single parameterized SQL helper — no assumption that packages are always composite or children are always leaf
+- `Set` returns metadata read from the write transaction, not from a post-commit reader pool query
+- Shared `querier` interface, `getCatalog`, and `queryLabels` helpers eliminate duplication between `Set` and `Get`
 
 ## Acceptance Criteria
 
 - All existing tests pass without modification (behavioral equivalence)
 - No deadlocks when nesting read iterators (e.g., iterating bundles while calling `Property()`)
 - No deadlocks when nesting FBC staging DB accessors (e.g., iterating channels inside a bundles loop)
+- No TOCTOU race in `Set` return value under concurrent writers
 - Pre-collection helper functions (`collectBundles`, `collectChannels`, `collectBundleResults`, etc.) and their associated intermediate types (`bundleResult`, `compositeUpdateGraphResult`, `updateGraphResult`) are removed
 - `make ci` passes (lint, test, build)

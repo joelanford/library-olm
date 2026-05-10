@@ -19,6 +19,14 @@
 - [ ] All intermediate result types (`bundleResult`, `compositeUpdateGraphResult`, `updateGraphResult`) are removed
 - [ ] Successor query streaming correctly deduplicates explicit and range-based results via a `seen` map
 - [ ] `db.List()` streams metadata rows and queries labels per-row instead of pre-collecting
+- [ ] `ListPackages`, `GetPackage`, `ListGraphs`, `GetGraph` all use a single `queryGraphNodes` helper
+- [ ] `queryGraphNodes` builds SQL from optional `parentID` and `name` parameters (no duplicated SQL)
+- [ ] `GraphNode.HasChildren` determined via `EXISTS` subquery per row
+- [ ] `GraphNode.Path` carries full hierarchy from root for contextual error messages
+- [ ] `wrapGraphNode` returns `compositeUpdateGraphWrapper` or `*UpdateGraphQuery` based on `HasChildren`
+- [ ] `Set` reads metadata and labels from `tx` before committing (no post-commit read via `readerDB`)
+- [ ] `querier` interface satisfied by both `*sql.DB` and `*sql.Tx`
+- [ ] `getCatalog` and `queryLabels` shared by `Set` (via `tx`) and `Get` (via `readerDB`)
 
 ## Project Conventions
 
