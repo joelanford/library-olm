@@ -34,13 +34,13 @@ func NewImporter(fsys fs.FS, opts ...ImporterOption) *Importer {
 // individual [PackageError] values. Fatal errors (corrupt filesystem,
 // database failures) are returned directly.
 func (i *Importer) Import(ctx context.Context, w catalogv1.Writer) error {
-	rawDB, tmpDir, err := internal.OpenTempDB()
+	writerDB, readerDB, tmpDir, err := internal.OpenTempDB()
 	if err != nil {
 		return fmt.Errorf("open staging database: %w", err)
 	}
-	defer func() { _ = internal.CloseTempDB(rawDB, tmpDir) }()
+	defer func() { _ = internal.CloseTempDB(writerDB, readerDB, tmpDir) }()
 
-	ingestResult, err := internal.Ingest(ctx, rawDB, i.fsys, i.olmPkgExt)
+	ingestResult, err := internal.Ingest(ctx, writerDB, i.fsys, i.olmPkgExt)
 	if err != nil {
 		return fmt.Errorf("ingest: %w", err)
 	}
@@ -53,7 +53,7 @@ func (i *Importer) Import(ctx context.Context, w catalogv1.Writer) error {
 	registry := internal.NewHandlerRegistry()
 	registry.Register(&internal.OLMPackageHandler{})
 
-	normalizeResult, err := internal.Normalize(ctx, rawDB, registry, skipPackages, w)
+	normalizeResult, err := internal.Normalize(ctx, readerDB, registry, skipPackages, w)
 	if err != nil {
 		return fmt.Errorf("normalize: %w", err)
 	}
@@ -64,7 +64,7 @@ func (i *Importer) Import(ctx context.Context, w catalogv1.Writer) error {
 
 	var finalizeErrors map[string][]error
 	if i.olmPkgExt != nil {
-		finalizeErrors, err = i.finalize(ctx, rawDB, w, skipPackages)
+		finalizeErrors, err = i.finalize(ctx, readerDB, w, skipPackages)
 		if err != nil {
 			return fmt.Errorf("finalize: %w", err)
 		}
@@ -73,8 +73,8 @@ func (i *Importer) Import(ctx context.Context, w catalogv1.Writer) error {
 	return mergePackageErrors(ingestResult.PackageErrors, normalizeResult.PackageErrors, finalizeErrors)
 }
 
-func (i *Importer) finalize(ctx context.Context, rawDB *sql.DB, w catalogv1.Writer, skipPackages map[string]bool) (map[string][]error, error) {
-	rows, err := rawDB.QueryContext(ctx, "SELECT package_name FROM "+internal.TableRawPackage)
+func (i *Importer) finalize(ctx context.Context, readerDB *sql.DB, w catalogv1.Writer, skipPackages map[string]bool) (map[string][]error, error) {
+	rows, err := readerDB.QueryContext(ctx, "SELECT package_name FROM "+internal.TableRawPackage)
 	if err != nil {
 		return nil, fmt.Errorf("listing packages: %w", err)
 	}
@@ -97,7 +97,7 @@ func (i *Importer) finalize(ctx context.Context, rawDB *sql.DB, w catalogv1.Writ
 		if skipPackages[pkgName] {
 			continue
 		}
-		pkg := &packageAccessorAdapter{a: internal.NewPackageAccessor(rawDB, pkgName)}
+		pkg := &packageAccessorAdapter{a: internal.NewPackageAccessor(readerDB, pkgName)}
 		pw := internal.NewPropertyWriter(pkgName, w)
 		if err := i.olmPkgExt.FinalizePackage(ctx, pkg, pw); err != nil {
 			pkgErrors[pkgName] = append(pkgErrors[pkgName], fmt.Errorf("finalize: %w", err))

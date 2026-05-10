@@ -9,13 +9,13 @@ import (
 )
 
 func TestDropRawTables(t *testing.T) {
-	db, tmpDir, err := OpenTempDB()
+	writerDB, readerDB, tmpDir, err := OpenTempDB()
 	require.NoError(t, err)
-	defer func() { require.NoError(t, CloseTempDB(db, tmpDir)) }()
+	defer func() { require.NoError(t, CloseTempDB(writerDB, readerDB, tmpDir)) }()
 
 	ctx := context.Background()
 
-	_, err = db.ExecContext(ctx, `
+	_, err = writerDB.ExecContext(ctx, `
 		INSERT INTO raw_olm_package (package_name) VALUES ('pkg');
 		INSERT INTO raw_olm_channel (name, package_name) VALUES ('stable', 'pkg');
 		INSERT INTO raw_olm_channel_entry (channel_name, package_name, bundle_name) VALUES ('stable', 'pkg', 'pkg.v1');
@@ -23,12 +23,12 @@ func TestDropRawTables(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	err = DropRawTables(ctx, db)
+	err = DropRawTables(ctx, writerDB)
 	require.NoError(t, err)
 
 	for _, table := range RawTables {
 		var count int
-		err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&count)
+		err := readerDB.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&count)
 		assert.ErrorContains(t, err, "no such table", "expected table %s to be dropped", table)
 	}
 }

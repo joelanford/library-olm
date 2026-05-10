@@ -3,54 +3,69 @@ package internal
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
 	_ "modernc.org/sqlite"
 )
 
-// OpenTempDB creates a temporary SQLite database with raw FBC staging tables.
-// The caller is responsible for calling CloseTempDB when done.
-func OpenTempDB() (*sql.DB, string, error) {
-	tmpDir, err := os.MkdirTemp("", "fbc-staging-*")
+// OpenTempDB creates a temporary SQLite database with raw FBC staging tables
+// and returns separate writer and reader pools. The caller is responsible for
+// calling CloseTempDB when done.
+func OpenTempDB() (writerDB, readerDB *sql.DB, tmpDir string, err error) {
+	tmpDir, err = os.MkdirTemp("", "fbc-staging-*")
 	if err != nil {
-		return nil, "", fmt.Errorf("creating temp dir: %w", err)
+		return nil, nil, "", fmt.Errorf("creating temp dir: %w", err)
 	}
 
 	dbPath := filepath.Join(tmpDir, "staging.db")
-	db, err := sql.Open("sqlite", dbPath)
+
+	writerDB, err = sql.Open("sqlite", stagingDSN(dbPath, false))
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
-		return nil, "", fmt.Errorf("opening database: %w", err)
+		return nil, nil, "", fmt.Errorf("opening writer database: %w", err)
 	}
+	writerDB.SetMaxOpenConns(1)
 
-	db.SetMaxOpenConns(1)
-
-	if _, err := db.Exec(`
-		PRAGMA journal_mode=WAL;
-		PRAGMA synchronous=NORMAL;
-		PRAGMA busy_timeout=5000;
-	`); err != nil {
-		_ = db.Close()
+	if _, err := writerDB.Exec(rawSchemaSQL); err != nil {
+		_ = writerDB.Close()
 		_ = os.RemoveAll(tmpDir)
-		return nil, "", fmt.Errorf("setting pragmas: %w", err)
+		return nil, nil, "", fmt.Errorf("creating raw tables: %w", err)
 	}
 
-	if _, err := db.Exec(rawSchemaSQL); err != nil {
-		_ = db.Close()
+	readerDB, err = sql.Open("sqlite", stagingDSN(dbPath, true))
+	if err != nil {
+		_ = writerDB.Close()
 		_ = os.RemoveAll(tmpDir)
-		return nil, "", fmt.Errorf("creating raw tables: %w", err)
+		return nil, nil, "", fmt.Errorf("opening reader database: %w", err)
 	}
 
-	return db, tmpDir, nil
+	return writerDB, readerDB, tmpDir, nil
 }
 
-// CloseTempDB closes the database and removes the temporary directory.
-func CloseTempDB(db *sql.DB, tmpDir string) error {
-	dbErr := db.Close()
+func stagingDSN(path string, readOnly bool) string {
+	q := url.Values{}
+	if readOnly {
+		q.Set("mode", "ro")
+	}
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "synchronous(NORMAL)")
+	q.Add("_pragma", "foreign_keys(ON)")
+	return fmt.Sprintf("file:%s?%s", url.PathEscape(path), q.Encode())
+}
+
+// CloseTempDB closes both database pools and removes the temporary directory.
+func CloseTempDB(writerDB, readerDB *sql.DB, tmpDir string) error {
+	readerErr := readerDB.Close()
+	writerErr := writerDB.Close()
 	rmErr := os.RemoveAll(tmpDir)
-	if dbErr != nil {
-		return dbErr
+	if readerErr != nil {
+		return readerErr
+	}
+	if writerErr != nil {
+		return writerErr
 	}
 	return rmErr
 }
