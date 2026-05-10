@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"net/url"
 
 	"k8s.io/apimachinery/pkg/labels"
 	_ "modernc.org/sqlite"
@@ -16,61 +17,69 @@ import (
 )
 
 type db struct {
-	sqlDB *sql.DB
+	writerDB *sql.DB
+	readerDB *sql.DB
 }
 
 // OpenStore opens (or creates) a SQLite-backed Store at the given path.
 func OpenStore(path string) (Store, error) {
-	sqlDB, err := sql.Open("sqlite", path)
+	writerDB, err := sql.Open("sqlite", sqliteDSN(path, false))
 	if err != nil {
-		return nil, fmt.Errorf("opening database: %w", err)
+		return nil, fmt.Errorf("opening writer database: %w", err)
 	}
-
-	sqlDB.SetMaxOpenConns(1)
-
-	if _, err := sqlDB.Exec(`
-		PRAGMA journal_mode=WAL;
-		PRAGMA synchronous=NORMAL;
-		PRAGMA busy_timeout=5000;
-		PRAGMA foreign_keys=ON;
-	`); err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("setting pragmas: %w", err)
-	}
+	writerDB.SetMaxOpenConns(1)
 
 	// Run metadata migrations
-	if err := internal.RunMetadataMigrations(sqlDB); err != nil {
-		_ = sqlDB.Close()
+	if err := internal.RunMetadataMigrations(writerDB); err != nil {
+		_ = writerDB.Close()
 		return nil, fmt.Errorf("running metadata migrations: %w", err)
 	}
 
 	// Check content schema version
-	ok, err := internal.CheckContentSchemaVersion(sqlDB)
+	ok, err := internal.CheckContentSchemaVersion(writerDB)
 	if err != nil {
-		_ = sqlDB.Close()
+		_ = writerDB.Close()
 		return nil, fmt.Errorf("checking content schema version: %w", err)
 	}
 	if !ok {
 		// Either no content tables exist or version mismatch — rebuild
-		if err := internal.DropContentTables(sqlDB); err != nil {
-			_ = sqlDB.Close()
+		if err := internal.DropContentTables(writerDB); err != nil {
+			_ = writerDB.Close()
 			return nil, fmt.Errorf("dropping content tables: %w", err)
 		}
-		if err := internal.CreateContentTables(sqlDB); err != nil {
-			_ = sqlDB.Close()
+		if err := internal.CreateContentTables(writerDB); err != nil {
+			_ = writerDB.Close()
 			return nil, fmt.Errorf("creating content tables: %w", err)
 		}
-		if err := internal.StoreContentSchemaVersion(sqlDB); err != nil {
-			_ = sqlDB.Close()
+		if err := internal.StoreContentSchemaVersion(writerDB); err != nil {
+			_ = writerDB.Close()
 			return nil, fmt.Errorf("storing content schema version: %w", err)
 		}
-		if err := internal.ClearAllDigests(sqlDB); err != nil {
-			_ = sqlDB.Close()
+		if err := internal.ClearAllDigests(writerDB); err != nil {
+			_ = writerDB.Close()
 			return nil, fmt.Errorf("clearing digests: %w", err)
 		}
 	}
 
-	return &db{sqlDB: sqlDB}, nil
+	readerDB, err := sql.Open("sqlite", sqliteDSN(path, true))
+	if err != nil {
+		_ = writerDB.Close()
+		return nil, fmt.Errorf("opening reader database: %w", err)
+	}
+
+	return &db{writerDB: writerDB, readerDB: readerDB}, nil
+}
+
+func sqliteDSN(path string, readOnly bool) string {
+	q := url.Values{}
+	if readOnly {
+		q.Set("mode", "ro")
+	}
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "synchronous(NORMAL)")
+	q.Add("_pragma", "foreign_keys(ON)")
+	return fmt.Sprintf("file:%s?%s", url.PathEscape(path), q.Encode())
 }
 
 func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, error) {
@@ -79,7 +88,7 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 		opt(&cfg)
 	}
 
-	tx, err := d.sqlDB.BeginTx(ctx, nil)
+	tx, err := d.writerDB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("beginning transaction: %w", err)
 	}
@@ -200,7 +209,7 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 func (d *db) Get(name string) (Catalog, error) {
 	var uri, digest string
 	var priority int
-	err := d.sqlDB.QueryRow(
+	err := d.readerDB.QueryRow(
 		"SELECT uri, digest, priority FROM catalog_metadata WHERE name = ?", name,
 	).Scan(&uri, &digest, &priority)
 	if err == sql.ErrNoRows {
@@ -221,12 +230,12 @@ func (d *db) Get(name string) (Catalog, error) {
 		digest:   digest,
 		priority: priority,
 		labels:   labels,
-		query:    &internal.CatalogQuery{DB: d.sqlDB, CatalogName: name},
+		query:    &internal.CatalogQuery{DB: d.readerDB, CatalogName: name},
 	}, nil
 }
 
 func (d *db) Delete(name string) error {
-	tx, err := d.sqlDB.Begin()
+	tx, err := d.writerDB.Begin()
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
@@ -243,7 +252,7 @@ func (d *db) Delete(name string) error {
 }
 
 func (d *db) List() ([]Catalog, error) {
-	rows, err := d.sqlDB.Query("SELECT name, uri, digest, priority FROM catalog_metadata ORDER BY name")
+	rows, err := d.readerDB.Query("SELECT name, uri, digest, priority FROM catalog_metadata ORDER BY name")
 	if err != nil {
 		return nil, fmt.Errorf("querying catalogs: %w", err)
 	}
@@ -283,18 +292,23 @@ func (d *db) List() ([]Catalog, error) {
 			digest:   m.digest,
 			priority: m.priority,
 			labels:   labels,
-			query:    &internal.CatalogQuery{DB: d.sqlDB, CatalogName: m.name},
+			query:    &internal.CatalogQuery{DB: d.readerDB, CatalogName: m.name},
 		})
 	}
 	return catalogs, nil
 }
 
 func (d *db) Close() error {
-	return d.sqlDB.Close()
+	readerErr := d.readerDB.Close()
+	writerErr := d.writerDB.Close()
+	if readerErr != nil {
+		return readerErr
+	}
+	return writerErr
 }
 
 func (d *db) queryLabels(catalogName string) (map[string]string, error) {
-	rows, err := d.sqlDB.Query(
+	rows, err := d.readerDB.Query(
 		"SELECT key, value FROM catalog_labels WHERE catalog_name = ?", catalogName,
 	)
 	if err != nil {
