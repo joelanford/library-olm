@@ -29,176 +29,122 @@ func (a *PackageAccessor) ExtData() (json.RawMessage, error) {
 	return json.RawMessage(data), nil
 }
 
-// Bundles pre-collects all bundles before yielding so that callers
-// can safely nest other accessor queries (e.g., Channels) inside the
-// loop. With MaxOpenConns(1), streaming would deadlock on nested queries.
 func (a *PackageAccessor) Bundles() iter.Seq2[BundleAccessor, error] {
 	return func(yield func(BundleAccessor, error) bool) {
-		bundles, err := a.collectBundles()
+		rows, err := a.db.Query(
+			"SELECT name, package_name, version, release, image, ext_data FROM "+TableRawBundle+" WHERE package_name = ?",
+			a.packageName,
+		)
 		if err != nil {
-			yield(nil, err)
+			yield(nil, fmt.Errorf("querying bundles: %w", err))
 			return
 		}
-		for i := range bundles {
-			if !yield(&bundles[i], nil) {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var b bundleAccessor
+			if err := rows.Scan(&b.name, &b.pkg, &b.version, &b.release, &b.image, &b.extData); err != nil {
+				if !yield(nil, err) {
+					return
+				}
+				continue
+			}
+			if !yield(&b, nil) {
 				return
 			}
 		}
-	}
-}
-
-// collectBundles returns all bundles for the package. Iteration order is unspecified.
-func (a *PackageAccessor) collectBundles() ([]bundleAccessor, error) {
-	rows, err := a.db.Query(
-		"SELECT name, package_name, version, release, image, ext_data FROM "+TableRawBundle+" WHERE package_name = ?",
-		a.packageName,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("querying bundles: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var bundles []bundleAccessor
-	for rows.Next() {
-		var b bundleAccessor
-		if err := rows.Scan(&b.name, &b.pkg, &b.version, &b.release, &b.image, &b.extData); err != nil {
-			return nil, err
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
 		}
-		bundles = append(bundles, b)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return bundles, nil
 }
 
-// Channels pre-collects all channels before yielding so that callers
-// can safely nest other accessor queries (e.g., Entries) inside the
-// loop. With MaxOpenConns(1), streaming would deadlock on nested queries.
 func (a *PackageAccessor) Channels() iter.Seq2[ChannelAccessor, error] {
 	return func(yield func(ChannelAccessor, error) bool) {
-		channels, err := a.collectChannels()
+		rows, err := a.db.Query(
+			"SELECT name, ext_data FROM "+TableRawChannel+" WHERE package_name = ?",
+			a.packageName,
+		)
 		if err != nil {
-			yield(nil, err)
+			yield(nil, fmt.Errorf("querying channels: %w", err))
 			return
 		}
-		for i := range channels {
-			if !yield(&channels[i], nil) {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var ch channelAccessor
+			if err := rows.Scan(&ch.name, &ch.extData); err != nil {
+				if !yield(nil, err) {
+					return
+				}
+				continue
+			}
+			ch.db = a.db
+			ch.packageName = a.packageName
+			if !yield(&ch, nil) {
 				return
 			}
 		}
-	}
-}
-
-// collectChannels returns all channels for the package. Iteration order is unspecified.
-func (a *PackageAccessor) collectChannels() ([]channelAccessor, error) {
-	rows, err := a.db.Query(
-		"SELECT name, ext_data FROM "+TableRawChannel+" WHERE package_name = ?",
-		a.packageName,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("querying channels: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var channels []channelAccessor
-	for rows.Next() {
-		var ch channelAccessor
-		if err := rows.Scan(&ch.name, &ch.extData); err != nil {
-			return nil, err
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
 		}
-		ch.db = a.db
-		ch.packageName = a.packageName
-		channels = append(channels, ch)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return channels, nil
 }
 
-// Deprecations pre-collects all deprecations before yielding so that
-// callers can safely nest other accessor queries inside the loop.
-// With MaxOpenConns(1), streaming would deadlock on nested queries.
 func (a *PackageAccessor) Deprecations() iter.Seq2[DeprecationAccessor, error] {
 	return func(yield func(DeprecationAccessor, error) bool) {
-		deprecations, err := a.collectDeprecations()
+		rows, err := a.db.Query(
+			"SELECT ext_data FROM "+TableRawDeprecation+" WHERE package_name = ?",
+			a.packageName,
+		)
 		if err != nil {
-			yield(nil, err)
+			yield(nil, fmt.Errorf("querying deprecations: %w", err))
 			return
 		}
-		for i := range deprecations {
-			if !yield(&deprecations[i], nil) {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var d deprecationAccessor
+			if err := rows.Scan(&d.extData); err != nil {
+				if !yield(nil, err) {
+					return
+				}
+				continue
+			}
+			if !yield(&d, nil) {
 				return
 			}
 		}
-	}
-}
-
-func (a *PackageAccessor) collectDeprecations() ([]deprecationAccessor, error) {
-	rows, err := a.db.Query(
-		"SELECT ext_data FROM "+TableRawDeprecation+" WHERE package_name = ?",
-		a.packageName,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("querying deprecations: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var deprecations []deprecationAccessor
-	for rows.Next() {
-		var d deprecationAccessor
-		if err := rows.Scan(&d.extData); err != nil {
-			return nil, err
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
 		}
-		deprecations = append(deprecations, d)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return deprecations, nil
 }
 
-// Others pre-collects all "other" blobs before yielding so that
-// callers can safely nest other accessor queries inside the loop.
-// With MaxOpenConns(1), streaming would deadlock on nested queries.
 func (a *PackageAccessor) Others() iter.Seq2[OtherAccessor, error] {
 	return func(yield func(OtherAccessor, error) bool) {
-		others, err := a.collectOthers()
+		rows, err := a.db.Query(
+			"SELECT schema, name, ext_data FROM "+TableRawOther+" WHERE package_name = ?",
+			a.packageName,
+		)
 		if err != nil {
-			yield(nil, err)
+			yield(nil, fmt.Errorf("querying others: %w", err))
 			return
 		}
-		for i := range others {
-			if !yield(&others[i], nil) {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var o otherAccessor
+			if err := rows.Scan(&o.schema, &o.name, &o.extData); err != nil {
+				if !yield(nil, err) {
+					return
+				}
+				continue
+			}
+			if !yield(&o, nil) {
 				return
 			}
 		}
-	}
-}
-
-func (a *PackageAccessor) collectOthers() ([]otherAccessor, error) {
-	rows, err := a.db.Query(
-		"SELECT schema, name, ext_data FROM "+TableRawOther+" WHERE package_name = ?",
-		a.packageName,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("querying others: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var others []otherAccessor
-	for rows.Next() {
-		var o otherAccessor
-		if err := rows.Scan(&o.schema, &o.name, &o.extData); err != nil {
-			return nil, err
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
 		}
-		others = append(others, o)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return others, nil
 }
 
 // nullRawMessage handles scanning nullable JSON columns.
@@ -261,51 +207,37 @@ type channelAccessor struct {
 func (c *channelAccessor) Name() string             { return c.name }
 func (c *channelAccessor) ExtData() json.RawMessage { return json.RawMessage(c.extData) }
 
-// Entries pre-collects all channel entries before yielding so that
-// callers can safely nest other accessor queries inside the loop.
-// With MaxOpenConns(1), streaming would deadlock on nested queries.
 func (c *channelAccessor) Entries() iter.Seq2[ChannelEntryAccessor, error] {
 	return func(yield func(ChannelEntryAccessor, error) bool) {
-		entries, err := c.collectEntries()
+		rows, err := c.db.Query(
+			"SELECT bundle_name, replaces, skips, skip_range FROM "+TableRawChannelEntry+" WHERE package_name = ? AND channel_name = ?",
+			c.packageName, c.name,
+		)
 		if err != nil {
-			yield(nil, err)
+			yield(nil, fmt.Errorf("querying channel entries: %w", err))
 			return
 		}
-		for i := range entries {
-			if !yield(&entries[i], nil) {
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var e channelEntryAccessor
+			var skipsStr string
+			if err := rows.Scan(&e.bundleName, &e.replaces, &skipsStr, &e.skipRange); err != nil {
+				if !yield(nil, err) {
+					return
+				}
+				continue
+			}
+			if skipsStr != "" {
+				e.skips = strings.Split(skipsStr, ",")
+			}
+			if !yield(&e, nil) {
 				return
 			}
 		}
-	}
-}
-
-// collectEntries returns all entries for the channel. Iteration order is unspecified.
-func (c *channelAccessor) collectEntries() ([]channelEntryAccessor, error) {
-	rows, err := c.db.Query(
-		"SELECT bundle_name, replaces, skips, skip_range FROM "+TableRawChannelEntry+" WHERE package_name = ? AND channel_name = ?",
-		c.packageName, c.name,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("querying channel entries: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var entries []channelEntryAccessor
-	for rows.Next() {
-		var e channelEntryAccessor
-		var skipsStr string
-		if err := rows.Scan(&e.bundleName, &e.replaces, &skipsStr, &e.skipRange); err != nil {
-			return nil, err
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
 		}
-		if skipsStr != "" {
-			e.skips = strings.Split(skipsStr, ",")
-		}
-		entries = append(entries, e)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return entries, nil
 }
 
 type ChannelEntryAccessor = interface {
