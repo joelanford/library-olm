@@ -181,6 +181,32 @@ func (w *ContentWriter) SetGraphProperty(path []string, key string, val any) err
 	return nil
 }
 
+func (w *ContentWriter) SetGraphDeprecation(path []string, message string) error {
+	p, err := graphPath(path)
+	if err != nil {
+		return err
+	}
+	_, err = w.tx.Exec(
+		"UPDATE content_graphs SET deprecation_message = ? WHERE catalog_name = ? AND path = ?",
+		message, w.catalogName, p,
+	)
+	if err != nil {
+		return fmt.Errorf("setting graph deprecation on path %v: %w", path, err)
+	}
+	return nil
+}
+
+func (w *ContentWriter) SetBundleDeprecation(bundleID string, message string) error {
+	_, err := w.tx.Exec(
+		"UPDATE content_bundles SET deprecation_message = ? WHERE catalog_name = ? AND bundle_id = ?",
+		message, w.catalogName, bundleID,
+	)
+	if err != nil {
+		return fmt.Errorf("setting bundle deprecation on %q: %w", bundleID, err)
+	}
+	return nil
+}
+
 // DeleteCatalogContent deletes all content rows for a catalog name.
 // ON DELETE CASCADE on child tables handles cleanup automatically.
 func DeleteCatalogContent(tx *sql.Tx, catalogName string) error {
