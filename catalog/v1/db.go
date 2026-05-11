@@ -196,42 +196,19 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 		return nil, fmt.Errorf("inserting reserved label: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("committing transaction: %w", err)
-	}
-	cat, err := d.Get(name)
+	cat, err := getCatalog(tx, d.readerDB, name)
 	if err != nil {
 		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("committing transaction: %w", err)
 	}
 	return cat, importErr
 }
 
 func (d *db) Get(name string) (Catalog, error) {
-	var uri, digest string
-	var priority int
-	err := d.readerDB.QueryRow(
-		"SELECT uri, digest, priority FROM catalog_metadata WHERE name = ?", name,
-	).Scan(&uri, &digest, &priority)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("catalog %q not found", name)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("querying catalog metadata: %w", err)
-	}
-
-	labels, err := d.queryLabels(name)
-	if err != nil {
-		return nil, err
-	}
-
-	return &storedCatalog{
-		name:     name,
-		uri:      uri,
-		digest:   digest,
-		priority: priority,
-		labels:   labels,
-		query:    &internal.CatalogQuery{DB: d.readerDB, CatalogName: name},
-	}, nil
+	return getCatalog(d.readerDB, d.readerDB, name)
 }
 
 func (d *db) Delete(name string) error {
@@ -266,7 +243,7 @@ func (d *db) List() ([]Catalog, error) {
 			return nil, fmt.Errorf("scanning catalog row: %w", err)
 		}
 
-		labels, err := d.queryLabels(name)
+		labels, err := queryLabels(d.readerDB, name)
 		if err != nil {
 			return nil, err
 		}
@@ -295,8 +272,41 @@ func (d *db) Close() error {
 	return writerErr
 }
 
-func (d *db) queryLabels(catalogName string) (map[string]string, error) {
-	rows, err := d.readerDB.Query(
+type querier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func getCatalog(q querier, readerDB *sql.DB, name string) (*storedCatalog, error) {
+	var uri, digest string
+	var priority int
+	err := q.QueryRow(
+		"SELECT uri, digest, priority FROM catalog_metadata WHERE name = ?", name,
+	).Scan(&uri, &digest, &priority)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("catalog %q not found", name)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying catalog metadata: %w", err)
+	}
+
+	labels, err := queryLabels(q, name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &storedCatalog{
+		name:     name,
+		uri:      uri,
+		digest:   digest,
+		priority: priority,
+		labels:   labels,
+		query:    &internal.CatalogQuery{DB: readerDB, CatalogName: name},
+	}, nil
+}
+
+func queryLabels(q querier, catalogName string) (map[string]string, error) {
+	rows, err := q.Query(
 		"SELECT key, value FROM catalog_labels WHERE catalog_name = ?", catalogName,
 	)
 	if err != nil {
