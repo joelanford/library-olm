@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"strings"
 
 	bsemver "github.com/blang/semver/v4"
 
@@ -58,6 +59,17 @@ func (b BundleRow) Property(ctx context.Context, key string) (json.RawMessage, e
 	return json.RawMessage(val), nil
 }
 
+// GraphNode represents a graph entry from the content_graphs table,
+// along with whether it has child graphs.
+type GraphNode struct {
+	DB          *sql.DB
+	CatalogName string
+	ID          int64
+	Name        string
+	Path        []string
+	HasChildren bool
+}
+
 // CatalogQuery provides catalog query operations scoped to a single catalog
 // within the shared content tables.
 type CatalogQuery struct {
@@ -65,51 +77,17 @@ type CatalogQuery struct {
 	CatalogName string
 }
 
-// ListPackages returns an iterator over the top-level composite update graphs
-// (packages) for this catalog.
-func (c *CatalogQuery) ListPackages(ctx context.Context) iter.Seq2[*CompositeUpdateGraphQuery, error] {
-	return func(yield func(*CompositeUpdateGraphQuery, error) bool) {
-		rows, err := c.DB.QueryContext(ctx,
-			"SELECT id, name FROM content_graphs WHERE parent_id IS NULL AND catalog_name = ? ORDER BY name",
-			c.CatalogName)
-		if err != nil {
-			yield(nil, err)
-			return
-		}
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			var id int64
-			var name string
-			if err := rows.Scan(&id, &name); err != nil {
-				if !yield(nil, err) {
-					return
-				}
-				continue
-			}
-			if !yield(&CompositeUpdateGraphQuery{DB: c.DB, CatalogName: c.CatalogName, GraphID: id, GraphName: name}, nil) {
-				return
-			}
-		}
-		if err := rows.Err(); err != nil {
-			yield(nil, err)
-		}
-	}
+// ListPackages returns an iterator over the top-level graphs (packages) for this catalog.
+func (c *CatalogQuery) ListPackages(ctx context.Context) iter.Seq2[GraphNode, error] {
+	return queryGraphNodes(ctx, c.DB, c.CatalogName, nil, "", nil)
 }
 
-// GetPackage returns the composite update graph for a specific package in this catalog.
-func (c *CatalogQuery) GetPackage(ctx context.Context, name string) (*CompositeUpdateGraphQuery, error) {
-	var id int64
-	err := c.DB.QueryRowContext(ctx,
-		"SELECT id FROM content_graphs WHERE name = ? AND parent_id IS NULL AND catalog_name = ?",
-		name, c.CatalogName,
-	).Scan(&id)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("package %q not found", name)
+// GetPackage returns the graph node for a specific package in this catalog.
+func (c *CatalogQuery) GetPackage(ctx context.Context, name string) (GraphNode, error) {
+	for node, err := range queryGraphNodes(ctx, c.DB, c.CatalogName, nil, name, nil) {
+		return node, err
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &CompositeUpdateGraphQuery{DB: c.DB, CatalogName: c.CatalogName, GraphID: id, GraphName: name}, nil
+	return GraphNode{}, fmt.Errorf("package %q not found", name)
 }
 
 // CompositeUpdateGraphQuery provides query operations for a composite update graph
@@ -119,6 +97,7 @@ type CompositeUpdateGraphQuery struct {
 	CatalogName string
 	GraphID     int64
 	GraphName   string
+	GraphPath   []string
 }
 
 func (g *CompositeUpdateGraphQuery) Name() string { return g.GraphName }
@@ -135,47 +114,17 @@ func (g *CompositeUpdateGraphQuery) Successors(ctx context.Context, from bundlev
 	return querySuccessorsDescendant(ctx, g.DB, g.CatalogName, g.GraphID, from.ID(), from.NameVersionRelease().Version)
 }
 
-// ListGraphs returns an iterator over the child update graphs.
-func (g *CompositeUpdateGraphQuery) ListGraphs(ctx context.Context) iter.Seq2[*UpdateGraphQuery, error] {
-	return func(yield func(*UpdateGraphQuery, error) bool) {
-		rows, err := g.DB.QueryContext(ctx,
-			"SELECT id, name FROM content_graphs WHERE parent_id = ? ORDER BY name",
-			g.GraphID)
-		if err != nil {
-			yield(nil, err)
-			return
-		}
-		defer func() { _ = rows.Close() }()
-		for rows.Next() {
-			var id int64
-			var name string
-			if err := rows.Scan(&id, &name); err != nil {
-				if !yield(nil, err) {
-					return
-				}
-				continue
-			}
-			if !yield(&UpdateGraphQuery{DB: g.DB, CatalogName: g.CatalogName, GraphID: id, GraphName: name}, nil) {
-				return
-			}
-		}
-		if err := rows.Err(); err != nil {
-			yield(nil, err)
-		}
-	}
+// ListGraphs returns an iterator over the child graphs.
+func (g *CompositeUpdateGraphQuery) ListGraphs(ctx context.Context) iter.Seq2[GraphNode, error] {
+	return queryGraphNodes(ctx, g.DB, g.CatalogName, &g.GraphID, "", g.GraphPath)
 }
 
-// GetGraph returns a specific child update graph by name and whether it has children of its own.
-func (g *CompositeUpdateGraphQuery) GetGraph(ctx context.Context, name string) (id int64, hasChildren bool, err error) {
-	err = g.DB.QueryRowContext(ctx,
-		`SELECT g.id, EXISTS(SELECT 1 FROM content_graphs c WHERE c.parent_id = g.id)
-		 FROM content_graphs g
-		 WHERE g.name = ? AND g.parent_id = ?`, name, g.GraphID,
-	).Scan(&id, &hasChildren)
-	if err == sql.ErrNoRows {
-		return 0, false, fmt.Errorf("graph %q not found in %q", name, g.GraphName)
+// GetGraph returns a specific child graph node by name.
+func (g *CompositeUpdateGraphQuery) GetGraph(ctx context.Context, name string) (GraphNode, error) {
+	for node, err := range queryGraphNodes(ctx, g.DB, g.CatalogName, &g.GraphID, name, g.GraphPath) {
+		return node, err
 	}
-	return id, hasChildren, err
+	return GraphNode{}, fmt.Errorf("graph %q not found in %s", name, strings.Join(g.GraphPath, "/"))
 }
 
 // UpdateGraphQuery provides query operations for a leaf update graph (e.g. a channel).
@@ -213,6 +162,48 @@ func (g *UpdateGraphQuery) ListBundles(ctx context.Context) iter.Seq2[bundlev1.B
 
 func (g *UpdateGraphQuery) Successors(ctx context.Context, from bundlev1.BundleIdentity) iter.Seq2[bundlev1.Bundle, error] {
 	return querySuccessorsDirect(ctx, g.DB, g.CatalogName, g.GraphID, from.ID(), from.NameVersionRelease().Version)
+}
+
+func queryGraphNodes(ctx context.Context, db *sql.DB, catalogName string, parentID *int64, name string, parentPath []string) iter.Seq2[GraphNode, error] {
+	where := `g.parent_id IS NULL AND g.catalog_name = ?`
+	args := []any{catalogName}
+	if parentID != nil {
+		where = `g.parent_id = ?`
+		args = []any{*parentID}
+	}
+	if name != "" {
+		where += ` AND g.name = ?`
+		args = append(args, name)
+	}
+	query := `SELECT g.id, g.name, EXISTS(SELECT 1 FROM content_graphs c WHERE c.parent_id = g.id)
+		 FROM content_graphs g WHERE ` + where + ` ORDER BY g.name`
+
+	return func(yield func(GraphNode, error) bool) {
+		rows, err := db.QueryContext(ctx, query, args...)
+		if err != nil {
+			yield(GraphNode{}, err)
+			return
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var node GraphNode
+			if err := rows.Scan(&node.ID, &node.Name, &node.HasChildren); err != nil {
+				if !yield(GraphNode{}, err) {
+					return
+				}
+				continue
+			}
+			node.DB = db
+			node.CatalogName = catalogName
+			node.Path = append(parentPath, node.Name)
+			if !yield(node, nil) {
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			yield(GraphNode{}, err)
+		}
+	}
 }
 
 func queryBundlesDirect(ctx context.Context, db *sql.DB, catalogName string, graphID int64) iter.Seq2[bundlev1.Bundle, error] {
