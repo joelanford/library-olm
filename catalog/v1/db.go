@@ -491,6 +491,14 @@ func (w *writerAdapter) SetGraphProperty(path []string, key string, val any) err
 	return w.cw.SetGraphProperty(path, key, val)
 }
 
+func (w *writerAdapter) SetGraphDeprecation(path []string, message string) error {
+	return w.cw.SetGraphDeprecation(path, message)
+}
+
+func (w *writerAdapter) SetBundleDeprecation(bundleID string, message string) error {
+	return w.cw.SetBundleDeprecation(bundleID, message)
+}
+
 // Compile-time interface checks.
 var _ Store = (*db)(nil)
 var _ StoreReader = (*selectedStore)(nil)

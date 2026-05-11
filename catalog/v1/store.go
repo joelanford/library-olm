@@ -17,6 +17,8 @@ type Writer interface {
 	AddPredecessorRange(path []string, bundleID, versionRange string) error
 	SetBundleProperty(bundleID, key string, val any) error
 	SetGraphProperty(path []string, key string, val any) error
+	SetGraphDeprecation(path []string, message string) error
+	SetBundleDeprecation(bundleID string, message string) error
 }
 
 // Importer defines how catalog content is imported into a store via a Writer.
