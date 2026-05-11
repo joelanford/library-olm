@@ -71,12 +71,13 @@ func CloseTempDB(writerDB, readerDB *sql.DB, tmpDir string) error {
 }
 
 const (
-	TableRawPackage      = "raw_olm_package"
-	TableRawChannel      = "raw_olm_channel"
-	TableRawChannelEntry = "raw_olm_channel_entry"
-	TableRawBundle       = "raw_olm_bundle"
-	TableRawDeprecation  = "raw_olm_deprecation"
-	TableRawOther        = "raw_other"
+	TableRawPackage            = "raw_olm_package"
+	TableRawChannel            = "raw_olm_channel"
+	TableRawChannelEntry       = "raw_olm_channel_entry"
+	TableRawBundle             = "raw_olm_bundle"
+	TableRawDeprecation        = "raw_olm_deprecation"
+	TableRawDeprecationEntries = "raw_olm_deprecation_entries"
+	TableRawOther              = "raw_other"
 )
 
 var RawTables = []string{
@@ -85,6 +86,7 @@ var RawTables = []string{
 	TableRawChannelEntry,
 	TableRawBundle,
 	TableRawDeprecation,
+	TableRawDeprecationEntries,
 	TableRawOther,
 }
 
@@ -127,6 +129,13 @@ CREATE TABLE ` + TableRawBundle + ` (
 CREATE TABLE ` + TableRawDeprecation + ` (
     package_name TEXT NOT NULL,
     ext_data     JSON
+);
+
+CREATE TABLE ` + TableRawDeprecationEntries + ` (
+    package_name TEXT NOT NULL,
+    schema       TEXT NOT NULL,
+    name         TEXT NOT NULL DEFAULT '',
+    message      TEXT NOT NULL CHECK(length(message) > 0)
 );
 
 CREATE TABLE ` + TableRawOther + ` (
