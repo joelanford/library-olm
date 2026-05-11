@@ -103,6 +103,10 @@ func (h *OLMPackageHandler) Normalize(ctx context.Context, rawDB *sql.DB, w cata
 		}
 	}
 
+	if err := h.writeDeprecations(rawDB, w, packageName); err != nil {
+		return fmt.Errorf("write deprecations for %q: %w", packageName, err)
+	}
+
 	return nil
 }
 
@@ -166,6 +170,39 @@ func (h *OLMPackageHandler) validateEntries(packageName string, bundles []valida
 		return fmt.Errorf("validate package %q: channel entries reference unknown bundles: %s", packageName, strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+func (h *OLMPackageHandler) writeDeprecations(rawDB *sql.DB, w catalogv1.Writer, packageName string) error {
+	rows, err := rawDB.Query(
+		"SELECT schema, name, message FROM "+TableRawDeprecationEntries+" WHERE package_name = ?",
+		packageName,
+	)
+	if err != nil {
+		return fmt.Errorf("querying deprecation entries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var schema, name, message string
+		if err := rows.Scan(&schema, &name, &message); err != nil {
+			return err
+		}
+		switch schema {
+		case declcfg.SchemaPackage:
+			if err := w.SetGraphDeprecation([]string{packageName}, message); err != nil {
+				return fmt.Errorf("set package deprecation: %w", err)
+			}
+		case declcfg.SchemaChannel:
+			if err := w.SetGraphDeprecation([]string{packageName, name}, message); err != nil {
+				return fmt.Errorf("set channel %q deprecation: %w", name, err)
+			}
+		case declcfg.SchemaBundle:
+			if err := w.SetBundleDeprecation(name, message); err != nil {
+				return fmt.Errorf("set bundle %q deprecation: %w", name, err)
+			}
+		}
+	}
+	return rows.Err()
 }
 
 func (h *OLMPackageHandler) writeChannelSuccessors(w catalogv1.Writer, chPath []string, entries []channelEntry) error {
