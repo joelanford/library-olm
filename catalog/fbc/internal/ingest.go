@@ -164,9 +164,6 @@ func parseBundle(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx) erro
 }
 
 func parseDeprecation(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx) error, error) {
-	if ext == nil {
-		return nil, nil
-	}
 	var d declcfg.Deprecation
 	if err := json.Unmarshal(meta.Blob, &d); err != nil {
 		return nil, fmt.Errorf("parse deprecation: %w", err)
@@ -176,9 +173,23 @@ func parseDeprecation(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx)
 		return nil, fmt.Errorf("OnDeprecation(%q): %w", d.Package, err)
 	}
 	return func(tx *sql.Tx) error {
-		_, err := tx.Exec("INSERT INTO "+TableRawDeprecation+" (package_name, ext_data) VALUES (?, ?)",
-			d.Package, nullableJSON(extData))
-		return err
+		for _, entry := range d.Entries {
+			if _, err := tx.Exec(
+				"INSERT INTO "+TableRawDeprecationEntries+" (package_name, schema, name, message) VALUES (?, ?, ?, ?)",
+				d.Package, entry.Reference.Schema, entry.Reference.Name, entry.Message,
+			); err != nil {
+				return err
+			}
+		}
+		if extData != nil {
+			if _, err := tx.Exec(
+				"INSERT INTO "+TableRawDeprecation+" (package_name, ext_data) VALUES (?, ?)",
+				d.Package, nullableJSON(extData),
+			); err != nil {
+				return err
+			}
+		}
+		return nil
 	}, nil
 }
 
