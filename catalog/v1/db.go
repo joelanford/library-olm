@@ -345,27 +345,15 @@ func (c *storedCatalog) Priority() int             { return c.priority }
 func (c *storedCatalog) Labels() map[string]string { return maps.Clone(c.labels) }
 
 func (c *storedCatalog) ListPackages(ctx context.Context) iter.Seq2[UpdateGraph, error] {
-	return func(yield func(UpdateGraph, error) bool) {
-		for pkg, err := range c.query.ListPackages(ctx) {
-			if err != nil {
-				if !yield(nil, err) {
-					return
-				}
-				continue
-			}
-			if !yield(&compositeUpdateGraphWrapper{q: pkg}, nil) {
-				return
-			}
-		}
-	}
+	return wrapGraphNodes(c.query.ListPackages(ctx))
 }
 
 func (c *storedCatalog) GetPackage(ctx context.Context, name string) (UpdateGraph, error) {
-	q, err := c.query.GetPackage(ctx, name)
+	node, err := c.query.GetPackage(ctx, name)
 	if err != nil {
 		return nil, err
 	}
-	return &compositeUpdateGraphWrapper{q: q}, nil
+	return wrapGraphNode(node), nil
 }
 
 // compositeUpdateGraphWrapper wraps an internal CompositeUpdateGraphQuery to
@@ -390,32 +378,40 @@ func (w *compositeUpdateGraphWrapper) Successors(ctx context.Context, from bundl
 }
 
 func (w *compositeUpdateGraphWrapper) ListGraphs(ctx context.Context) iter.Seq2[UpdateGraph, error] {
+	return wrapGraphNodes(w.q.ListGraphs(ctx))
+}
+
+func (w *compositeUpdateGraphWrapper) GetGraph(ctx context.Context, name string) (UpdateGraph, error) {
+	node, err := w.q.GetGraph(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return wrapGraphNode(node), nil
+}
+
+func wrapGraphNode(node internal.GraphNode) UpdateGraph {
+	if node.HasChildren {
+		return &compositeUpdateGraphWrapper{
+			q: &internal.CompositeUpdateGraphQuery{DB: node.DB, CatalogName: node.CatalogName, GraphID: node.ID, GraphName: node.Name, GraphPath: node.Path},
+		}
+	}
+	return &internal.UpdateGraphQuery{DB: node.DB, CatalogName: node.CatalogName, GraphID: node.ID, GraphName: node.Name}
+}
+
+func wrapGraphNodes(nodes iter.Seq2[internal.GraphNode, error]) iter.Seq2[UpdateGraph, error] {
 	return func(yield func(UpdateGraph, error) bool) {
-		for g, err := range w.q.ListGraphs(ctx) {
+		for node, err := range nodes {
 			if err != nil {
 				if !yield(nil, err) {
 					return
 				}
 				continue
 			}
-			if !yield(g, nil) {
+			if !yield(wrapGraphNode(node), nil) {
 				return
 			}
 		}
 	}
-}
-
-func (w *compositeUpdateGraphWrapper) GetGraph(ctx context.Context, name string) (UpdateGraph, error) {
-	id, hasChildren, err := w.q.GetGraph(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	if hasChildren {
-		return &compositeUpdateGraphWrapper{
-			q: &internal.CompositeUpdateGraphQuery{DB: w.q.DB, CatalogName: w.q.CatalogName, GraphID: id, GraphName: name},
-		}, nil
-	}
-	return &internal.UpdateGraphQuery{DB: w.q.DB, CatalogName: w.q.CatalogName, GraphID: id, GraphName: name}, nil
 }
 
 func (d *db) Select(selector labels.Selector) StoreReader {
