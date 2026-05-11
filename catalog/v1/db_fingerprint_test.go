@@ -23,7 +23,7 @@ import (
 // produced by the FBC fixture below. When the content schema or FBC import
 // logic changes, this test will fail. Update ContentSchemaVersion in
 // catalog/v1/internal/content.go and refresh this constant.
-const expectedFingerprint = "9b9ad6a9007fc28657a4062ced5aed62667aa2567733e70ba80ddfcfcff3ae0d"
+const expectedFingerprint = "30e730d79b2cbef81d6c50756d81f689c4a8f403cbd23cc13bf34ed6a9366e91"
 
 func TestContentFingerprint(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "fp.db")
