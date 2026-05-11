@@ -6,7 +6,7 @@ import (
 )
 
 // ContentSchemaVersion is the current version of the content schema.
-const ContentSchemaVersion = 4
+const ContentSchemaVersion = 5
 
 const contentSchemaSQL = `
 CREATE TABLE content_schema_version (
@@ -14,24 +14,26 @@ CREATE TABLE content_schema_version (
 );
 
 CREATE TABLE content_graphs (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    catalog_name TEXT NOT NULL,
-    name         TEXT NOT NULL,
-    path         TEXT NOT NULL,
-    parent_id    INTEGER,
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    catalog_name        TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    path                TEXT NOT NULL,
+    parent_id           INTEGER,
+    deprecation_message TEXT CHECK(deprecation_message IS NULL OR length(deprecation_message) > 0),
     FOREIGN KEY (catalog_name) REFERENCES catalog_metadata(name) ON DELETE CASCADE,
     FOREIGN KEY (parent_id) REFERENCES content_graphs(id) ON DELETE CASCADE,
     UNIQUE (catalog_name, path)
 );
 
 CREATE TABLE content_bundles (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    catalog_name TEXT NOT NULL,
-    bundle_id    TEXT NOT NULL,
-    package_name TEXT NOT NULL DEFAULT '',
-    version      TEXT NOT NULL DEFAULT '',
-    release      TEXT NOT NULL DEFAULT '',
-    uri          TEXT NOT NULL DEFAULT '',
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    catalog_name        TEXT NOT NULL,
+    bundle_id           TEXT NOT NULL,
+    package_name        TEXT NOT NULL DEFAULT '',
+    version             TEXT NOT NULL DEFAULT '',
+    release             TEXT NOT NULL DEFAULT '',
+    uri                 TEXT NOT NULL DEFAULT '',
+    deprecation_message TEXT CHECK(deprecation_message IS NULL OR length(deprecation_message) > 0),
     FOREIGN KEY (catalog_name) REFERENCES catalog_metadata(name) ON DELETE CASCADE,
     UNIQUE (catalog_name, bundle_id)
 );
