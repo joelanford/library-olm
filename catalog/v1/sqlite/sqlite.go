@@ -1,9 +1,8 @@
-package catalogv1
+package sqlite
 
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"iter"
 	"maps"
@@ -13,49 +12,48 @@ import (
 	_ "modernc.org/sqlite"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
-	"github.com/joelanford/library-olm/catalog/v1/internal"
+	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
-type db struct {
+const labelCatalogName = "olm.operatorframework.io/metadata.name"
+
+type store struct {
 	writerDB *sql.DB
 	readerDB *sql.DB
 }
 
 // OpenStore opens (or creates) a SQLite-backed Store at the given path.
-func OpenStore(path string) (Store, error) {
+func OpenStore(path string) (catalogv1.Store, error) {
 	writerDB, err := sql.Open("sqlite", sqliteDSN(path, false))
 	if err != nil {
 		return nil, fmt.Errorf("opening writer database: %w", err)
 	}
 	writerDB.SetMaxOpenConns(1)
 
-	// Run metadata migrations
-	if err := internal.RunMetadataMigrations(writerDB); err != nil {
+	if err := runMetadataMigrations(writerDB); err != nil {
 		_ = writerDB.Close()
 		return nil, fmt.Errorf("running metadata migrations: %w", err)
 	}
 
-	// Check content schema version
-	ok, err := internal.CheckContentSchemaVersion(writerDB)
+	ok, err := checkContentSchemaVersion(writerDB)
 	if err != nil {
 		_ = writerDB.Close()
 		return nil, fmt.Errorf("checking content schema version: %w", err)
 	}
 	if !ok {
-		// Either no content tables exist or version mismatch — rebuild
-		if err := internal.DropContentTables(writerDB); err != nil {
+		if err := dropContentTables(writerDB); err != nil {
 			_ = writerDB.Close()
 			return nil, fmt.Errorf("dropping content tables: %w", err)
 		}
-		if err := internal.CreateContentTables(writerDB); err != nil {
+		if err := createContentTables(writerDB); err != nil {
 			_ = writerDB.Close()
 			return nil, fmt.Errorf("creating content tables: %w", err)
 		}
-		if err := internal.StoreContentSchemaVersion(writerDB); err != nil {
+		if err := storeContentSchemaVersion(writerDB); err != nil {
 			_ = writerDB.Close()
 			return nil, fmt.Errorf("storing content schema version: %w", err)
 		}
-		if err := internal.ClearAllDigests(writerDB); err != nil {
+		if err := clearAllDigests(writerDB); err != nil {
 			_ = writerDB.Close()
 			return nil, fmt.Errorf("clearing digests: %w", err)
 		}
@@ -67,7 +65,7 @@ func OpenStore(path string) (Store, error) {
 		return nil, fmt.Errorf("opening reader database: %w", err)
 	}
 
-	return &db{writerDB: writerDB, readerDB: readerDB}, nil
+	return &store{writerDB: writerDB, readerDB: readerDB}, nil
 }
 
 func sqliteDSN(path string, readOnly bool) string {
@@ -82,11 +80,8 @@ func sqliteDSN(path string, readOnly bool) string {
 	return fmt.Sprintf("file:%s?%s", url.PathEscape(path), q.Encode())
 }
 
-func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, error) {
-	var cfg setConfig
-	for _, opt := range opts {
-		opt(&cfg)
-	}
+func (d *store) Set(ctx context.Context, name string, opts ...catalogv1.SetOption) (catalogv1.Catalog, error) {
+	cfg := catalogv1.ApplySetOptions(opts)
 
 	tx, err := d.writerDB.BeginTx(ctx, nil)
 	if err != nil {
@@ -94,7 +89,6 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Check if the catalog entry already exists
 	var exists bool
 	err = tx.QueryRowContext(ctx, "SELECT 1 FROM catalog_metadata WHERE name = ?", name).Scan(&exists)
 	isNew := err == sql.ErrNoRows
@@ -103,15 +97,14 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 	}
 
 	if isNew {
-		// For new entries, URI is required
-		if cfg.uri == nil {
+		if cfg.URI == nil {
 			return nil, fmt.Errorf("WithURI is required when creating a new catalog entry")
 		}
 
-		uri := *cfg.uri
+		uri := *cfg.URI
 		priority := 0
-		if cfg.priority != nil {
-			priority = *cfg.priority
+		if cfg.Priority != nil {
+			priority = *cfg.Priority
 		}
 
 		_, err := tx.ExecContext(ctx,
@@ -122,37 +115,33 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 			return nil, fmt.Errorf("inserting catalog metadata: %w", err)
 		}
 	} else {
-		// Update only specified fields
-		if cfg.uri != nil {
+		if cfg.URI != nil {
 			if _, err := tx.ExecContext(ctx,
 				"UPDATE catalog_metadata SET uri = ? WHERE name = ?",
-				*cfg.uri, name,
+				*cfg.URI, name,
 			); err != nil {
 				return nil, fmt.Errorf("updating uri: %w", err)
 			}
 		}
-		if cfg.priority != nil {
+		if cfg.Priority != nil {
 			if _, err := tx.ExecContext(ctx,
 				"UPDATE catalog_metadata SET priority = ? WHERE name = ?",
-				*cfg.priority, name,
+				*cfg.Priority, name,
 			); err != nil {
 				return nil, fmt.Errorf("updating priority: %w", err)
 			}
 		}
 	}
 
-	// Handle content import
 	var importErr error
-	if cfg.content != nil {
-		if err := internal.DeleteCatalogContent(tx, name); err != nil {
+	if cfg.Content != nil {
+		w := newContentWriter(tx, name)
+		if err := w.deleteAll(); err != nil {
 			return nil, fmt.Errorf("deleting existing content: %w", err)
 		}
 
-		w := &writerAdapter{
-			cw: internal.NewContentWriter(tx, name),
-		}
-		if err := cfg.content.importer.Import(ctx, w); err != nil {
-			if _, ok := err.(PartialImportError); !ok {
+		if err := cfg.Content.Importer.Import(ctx, w); err != nil {
+			if _, ok := err.(catalogv1.PartialImportError); !ok {
 				return nil, fmt.Errorf("importing content: %w", err)
 			}
 			importErr = err
@@ -160,15 +149,14 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 
 		if _, err := tx.ExecContext(ctx,
 			"UPDATE catalog_metadata SET digest = ? WHERE name = ?",
-			cfg.content.digest, name,
+			cfg.Content.Digest, name,
 		); err != nil {
 			return nil, fmt.Errorf("updating digest: %w", err)
 		}
 	}
 
-	// Handle labels
-	if cfg.labels != nil {
-		if v, ok := (*cfg.labels)[labelCatalogName]; ok && v != name {
+	if cfg.Labels != nil {
+		if v, ok := (*cfg.Labels)[labelCatalogName]; ok && v != name {
 			return nil, fmt.Errorf("label %q is reserved and must match the catalog name", labelCatalogName)
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -176,7 +164,7 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 		); err != nil {
 			return nil, fmt.Errorf("deleting existing labels: %w", err)
 		}
-		for k, v := range *cfg.labels {
+		for k, v := range *cfg.Labels {
 			if k == labelCatalogName {
 				continue
 			}
@@ -207,11 +195,11 @@ func (d *db) Set(ctx context.Context, name string, opts ...SetOption) (Catalog, 
 	return cat, importErr
 }
 
-func (d *db) Get(name string) (Catalog, error) {
+func (d *store) Get(name string) (catalogv1.Catalog, error) {
 	return getCatalog(d.readerDB, d.readerDB, name)
 }
 
-func (d *db) Delete(name string) error {
+func (d *store) Delete(name string) error {
 	tx, err := d.writerDB.Begin()
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
@@ -228,14 +216,14 @@ func (d *db) Delete(name string) error {
 	return nil
 }
 
-func (d *db) List() ([]Catalog, error) {
+func (d *store) List() ([]catalogv1.Catalog, error) {
 	rows, err := d.readerDB.Query("SELECT name, uri, digest, priority FROM catalog_metadata ORDER BY name")
 	if err != nil {
 		return nil, fmt.Errorf("querying catalogs: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var catalogs []Catalog
+	var catalogs []catalogv1.Catalog
 	for rows.Next() {
 		var name, uri, digest string
 		var priority int
@@ -243,7 +231,7 @@ func (d *db) List() ([]Catalog, error) {
 			return nil, fmt.Errorf("scanning catalog row: %w", err)
 		}
 
-		labels, err := queryLabels(d.readerDB, name)
+		lbls, err := queryLabels(d.readerDB, name)
 		if err != nil {
 			return nil, err
 		}
@@ -253,8 +241,8 @@ func (d *db) List() ([]Catalog, error) {
 			uri:      uri,
 			digest:   digest,
 			priority: priority,
-			labels:   labels,
-			query:    &internal.CatalogQuery{DB: d.readerDB, CatalogName: name},
+			labels:   lbls,
+			readerDB: d.readerDB,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -263,7 +251,7 @@ func (d *db) List() ([]Catalog, error) {
 	return catalogs, nil
 }
 
-func (d *db) Close() error {
+func (d *store) Close() error {
 	readerErr := d.readerDB.Close()
 	writerErr := d.writerDB.Close()
 	if readerErr != nil {
@@ -290,7 +278,7 @@ func getCatalog(q querier, readerDB *sql.DB, name string) (*storedCatalog, error
 		return nil, fmt.Errorf("querying catalog metadata: %w", err)
 	}
 
-	labels, err := queryLabels(q, name)
+	lbls, err := queryLabels(q, name)
 	if err != nil {
 		return nil, err
 	}
@@ -300,8 +288,8 @@ func getCatalog(q querier, readerDB *sql.DB, name string) (*storedCatalog, error
 		uri:      uri,
 		digest:   digest,
 		priority: priority,
-		labels:   labels,
-		query:    &internal.CatalogQuery{DB: readerDB, CatalogName: name},
+		labels:   lbls,
+		readerDB: readerDB,
 	}, nil
 }
 
@@ -314,28 +302,27 @@ func queryLabels(q querier, catalogName string) (map[string]string, error) {
 	}
 	defer func() { _ = rows.Close() }()
 
-	labels := make(map[string]string)
+	lbls := make(map[string]string)
 	for rows.Next() {
 		var k, v string
 		if err := rows.Scan(&k, &v); err != nil {
 			return nil, fmt.Errorf("scanning label row: %w", err)
 		}
-		labels[k] = v
+		lbls[k] = v
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating label rows: %w", err)
 	}
-	return labels, nil
+	return lbls, nil
 }
 
-// storedCatalog implements Catalog backed by metadata and a CatalogQuery.
 type storedCatalog struct {
 	name     string
 	uri      string
 	digest   string
 	priority int
 	labels   map[string]string
-	query    *internal.CatalogQuery
+	readerDB *sql.DB
 }
 
 func (c *storedCatalog) Name() string              { return c.name }
@@ -344,88 +331,25 @@ func (c *storedCatalog) Digest() string            { return c.digest }
 func (c *storedCatalog) Priority() int             { return c.priority }
 func (c *storedCatalog) Labels() map[string]string { return maps.Clone(c.labels) }
 
-func (c *storedCatalog) ListPackages(ctx context.Context) iter.Seq2[UpdateGraph, error] {
-	return wrapGraphNodes(c.query.ListPackages(ctx))
+func (c *storedCatalog) ListPackages(ctx context.Context) iter.Seq2[catalogv1.UpdateGraph, error] {
+	return queryGraphNodes(ctx, c.readerDB, c.name, nil, "", nil)
 }
 
-func (c *storedCatalog) GetPackage(ctx context.Context, name string) (UpdateGraph, error) {
-	node, err := c.query.GetPackage(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	return wrapGraphNode(node), nil
+func (c *storedCatalog) GetPackage(ctx context.Context, name string) (catalogv1.UpdateGraph, error) {
+	return queryGraphNode(ctx, c.readerDB, c.name, nil, name, nil, fmt.Sprintf("package %q not found", name))
 }
 
-// compositeUpdateGraphWrapper wraps an internal CompositeUpdateGraphQuery to
-// satisfy the CompositeUpdateGraph interface, converting internal concrete
-// return types to the interface types.
-type compositeUpdateGraphWrapper struct {
-	q *internal.CompositeUpdateGraphQuery
+func (d *store) Select(selector labels.Selector) catalogv1.StoreReader {
+	return &selectedStore{store: d, selector: selector}
 }
 
-func (w *compositeUpdateGraphWrapper) Name() string { return w.q.Name() }
-
-func (w *compositeUpdateGraphWrapper) Property(ctx context.Context, key string) (json.RawMessage, error) {
-	return w.q.Property(ctx, key)
-}
-
-func (w *compositeUpdateGraphWrapper) ListBundles(ctx context.Context) iter.Seq2[bundlev1.Bundle, error] {
-	return w.q.ListBundles(ctx)
-}
-
-func (w *compositeUpdateGraphWrapper) Successors(ctx context.Context, from bundlev1.BundleIdentity) iter.Seq2[bundlev1.Bundle, error] {
-	return w.q.Successors(ctx, from)
-}
-
-func (w *compositeUpdateGraphWrapper) ListGraphs(ctx context.Context) iter.Seq2[UpdateGraph, error] {
-	return wrapGraphNodes(w.q.ListGraphs(ctx))
-}
-
-func (w *compositeUpdateGraphWrapper) GetGraph(ctx context.Context, name string) (UpdateGraph, error) {
-	node, err := w.q.GetGraph(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	return wrapGraphNode(node), nil
-}
-
-func wrapGraphNode(node internal.GraphNode) UpdateGraph {
-	if node.HasChildren {
-		return &compositeUpdateGraphWrapper{
-			q: &internal.CompositeUpdateGraphQuery{DB: node.DB, CatalogName: node.CatalogName, GraphID: node.ID, GraphName: node.Name, GraphPath: node.Path},
-		}
-	}
-	return &internal.UpdateGraphQuery{DB: node.DB, CatalogName: node.CatalogName, GraphID: node.ID, GraphName: node.Name}
-}
-
-func wrapGraphNodes(nodes iter.Seq2[internal.GraphNode, error]) iter.Seq2[UpdateGraph, error] {
-	return func(yield func(UpdateGraph, error) bool) {
-		for node, err := range nodes {
-			if err != nil {
-				if !yield(nil, err) {
-					return
-				}
-				continue
-			}
-			if !yield(wrapGraphNode(node), nil) {
-				return
-			}
-		}
-	}
-}
-
-func (d *db) Select(selector labels.Selector) StoreReader {
-	return &selectedStore{db: d, selector: selector}
-}
-
-// selectedStore is a read-only view of a db filtered by label selector.
 type selectedStore struct {
-	db       *db
+	store    *store
 	selector labels.Selector
 }
 
-func (s *selectedStore) Get(name string) (Catalog, error) {
-	cat, err := s.db.Get(name)
+func (s *selectedStore) Get(name string) (catalogv1.Catalog, error) {
+	cat, err := s.store.Get(name)
 	if err != nil {
 		return nil, err
 	}
@@ -435,12 +359,12 @@ func (s *selectedStore) Get(name string) (Catalog, error) {
 	return cat, nil
 }
 
-func (s *selectedStore) List() ([]Catalog, error) {
-	all, err := s.db.List()
+func (s *selectedStore) List() ([]catalogv1.Catalog, error) {
+	all, err := s.store.List()
 	if err != nil {
 		return nil, err
 	}
-	var filtered []Catalog
+	var filtered []catalogv1.Catalog
 	for _, cat := range all {
 		if s.selector.Matches(labels.Set(cat.Labels())) {
 			filtered = append(filtered, cat)
@@ -449,8 +373,8 @@ func (s *selectedStore) List() ([]Catalog, error) {
 	return filtered, nil
 }
 
-func (s *selectedStore) Select(selector labels.Selector) StoreReader {
-	return &selectedStore{db: s.db, selector: andSelector(s.selector, selector)}
+func (s *selectedStore) Select(selector labels.Selector) catalogv1.StoreReader {
+	return &selectedStore{store: s.store, selector: andSelector(s.selector, selector)}
 }
 
 func andSelector(a, b labels.Selector) labels.Selector {
@@ -458,52 +382,11 @@ func andSelector(a, b labels.Selector) labels.Selector {
 	return a.Add(reqs...)
 }
 
-// writerAdapter adapts the internal ContentWriter to the catalogv1.Writer interface.
-type writerAdapter struct {
-	cw *internal.ContentWriter
-}
-
-func (w *writerAdapter) InsertBundle(id, pkg, version, release, uri string) error {
-	return w.cw.InsertBundle(id, pkg, version, release, uri)
-}
-
-func (w *writerAdapter) CreateGraph(path []string) error {
-	return w.cw.CreateGraph(path)
-}
-
-func (w *writerAdapter) AddBundleToGraph(path []string, bundleID string) error {
-	return w.cw.AddBundleToGraph(path, bundleID)
-}
-
-func (w *writerAdapter) AddEdge(path []string, fromBundleID, toBundleID string) error {
-	return w.cw.AddEdge(path, fromBundleID, toBundleID)
-}
-
-func (w *writerAdapter) AddPredecessorRange(path []string, bundleID, versionRange string) error {
-	return w.cw.AddPredecessorRange(path, bundleID, versionRange)
-}
-
-func (w *writerAdapter) SetBundleProperty(bundleID, key string, val any) error {
-	return w.cw.SetBundleProperty(bundleID, key, val)
-}
-
-func (w *writerAdapter) SetGraphProperty(path []string, key string, val any) error {
-	return w.cw.SetGraphProperty(path, key, val)
-}
-
-func (w *writerAdapter) SetGraphDeprecation(path []string, message string) error {
-	return w.cw.SetGraphDeprecation(path, message)
-}
-
-func (w *writerAdapter) SetBundleDeprecation(bundleID string, message string) error {
-	return w.cw.SetBundleDeprecation(bundleID, message)
-}
-
 // Compile-time interface checks.
-var _ Store = (*db)(nil)
-var _ StoreReader = (*selectedStore)(nil)
-var _ Catalog = (*storedCatalog)(nil)
-var _ CompositeUpdateGraph = (*compositeUpdateGraphWrapper)(nil)
-var _ UpdateGraph = (*internal.UpdateGraphQuery)(nil)
-var _ Writer = (*writerAdapter)(nil)
-var _ bundlev1.Bundle = internal.BundleRow{}
+var _ catalogv1.Store = (*store)(nil)
+var _ catalogv1.StoreReader = (*selectedStore)(nil)
+var _ catalogv1.Catalog = (*storedCatalog)(nil)
+var _ catalogv1.CompositeUpdateGraph = (*compositeGraphQuery)(nil)
+var _ catalogv1.UpdateGraph = (*graphQuery)(nil)
+var _ catalogv1.Writer = (*contentWriter)(nil)
+var _ bundlev1.Bundle = bundleRow{}

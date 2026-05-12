@@ -1,4 +1,4 @@
-package internal
+package sqlite
 
 import (
 	"database/sql"
@@ -18,21 +18,28 @@ func graphPath(path []string) (string, error) {
 	return strings.Join(path, "/"), nil
 }
 
-// ContentWriter writes catalog content into the content tables within a transaction.
-type ContentWriter struct {
+type contentWriter struct {
 	tx          *sql.Tx
 	catalogName string
 }
 
-// NewContentWriter creates a new ContentWriter for the given transaction and catalog name.
-func NewContentWriter(tx *sql.Tx, catalogName string) *ContentWriter {
-	return &ContentWriter{tx: tx, catalogName: catalogName}
+func newContentWriter(tx *sql.Tx, catalogName string) *contentWriter {
+	return &contentWriter{tx: tx, catalogName: catalogName}
 }
 
-// InsertBundle inserts a bundle into the content_bundles table.
-// If a bundle with the same ID already exists for this catalog, the insert
-// is silently ignored (idempotent for phantom bundles).
-func (w *ContentWriter) InsertBundle(id, pkg, version, release, uri string) error {
+func (w *contentWriter) deleteAll() error {
+	for _, stmt := range []string{
+		"DELETE FROM content_graphs WHERE catalog_name = ?",
+		"DELETE FROM content_bundles WHERE catalog_name = ?",
+	} {
+		if _, err := w.tx.Exec(stmt, w.catalogName); err != nil {
+			return fmt.Errorf("deleting catalog content for %q: %w", w.catalogName, err)
+		}
+	}
+	return nil
+}
+
+func (w *contentWriter) InsertBundle(id, pkg, version, release, uri string) error {
 	_, err := w.tx.Exec(
 		"INSERT OR IGNORE INTO content_bundles (catalog_name, bundle_id, package_name, version, release, uri) VALUES (?, ?, ?, ?, ?, ?)",
 		w.catalogName, id, pkg, version, release, uri,
@@ -43,7 +50,7 @@ func (w *ContentWriter) InsertBundle(id, pkg, version, release, uri string) erro
 	return nil
 }
 
-func (w *ContentWriter) resolveGraphID(path []string) (int64, error) {
+func (w *contentWriter) resolveGraphID(path []string) (int64, error) {
 	if len(path) == 0 {
 		return 0, fmt.Errorf("empty graph path")
 	}
@@ -62,7 +69,7 @@ func (w *ContentWriter) resolveGraphID(path []string) (int64, error) {
 	return graphID, nil
 }
 
-func (w *ContentWriter) CreateGraph(path []string) error {
+func (w *contentWriter) CreateGraph(path []string) error {
 	if len(path) == 0 {
 		return fmt.Errorf("empty graph path")
 	}
@@ -95,7 +102,7 @@ func (w *ContentWriter) CreateGraph(path []string) error {
 	return nil
 }
 
-func (w *ContentWriter) AddBundleToGraph(path []string, bundleID string) error {
+func (w *contentWriter) AddBundleToGraph(path []string, bundleID string) error {
 	graphID, err := w.resolveGraphID(path)
 	if err != nil {
 		return fmt.Errorf("adding bundle %q to graph %v: %w", bundleID, path, err)
@@ -110,7 +117,7 @@ func (w *ContentWriter) AddBundleToGraph(path []string, bundleID string) error {
 	return nil
 }
 
-func (w *ContentWriter) AddEdge(path []string, fromBundleID, toBundleID string) error {
+func (w *contentWriter) AddEdge(path []string, fromBundleID, toBundleID string) error {
 	graphID, err := w.resolveGraphID(path)
 	if err != nil {
 		return fmt.Errorf("adding edge %q -> %q in graph %v: %w", fromBundleID, toBundleID, path, err)
@@ -128,7 +135,7 @@ func (w *ContentWriter) AddEdge(path []string, fromBundleID, toBundleID string) 
 	return nil
 }
 
-func (w *ContentWriter) AddPredecessorRange(path []string, bundleID, versionRange string) error {
+func (w *contentWriter) AddPredecessorRange(path []string, bundleID, versionRange string) error {
 	if _, err := bsemver.ParseRange(versionRange); err != nil {
 		return fmt.Errorf("invalid predecessor range %q for bundle %q: %w", versionRange, bundleID, err)
 	}
@@ -147,7 +154,7 @@ func (w *ContentWriter) AddPredecessorRange(path []string, bundleID, versionRang
 	return nil
 }
 
-func (w *ContentWriter) SetBundleProperty(bundleID, key string, val any) error {
+func (w *contentWriter) SetBundleProperty(bundleID, key string, val any) error {
 	data, err := json.Marshal(val)
 	if err != nil {
 		return fmt.Errorf("marshal bundle property %q on %q: %w", key, bundleID, err)
@@ -162,7 +169,7 @@ func (w *ContentWriter) SetBundleProperty(bundleID, key string, val any) error {
 	return nil
 }
 
-func (w *ContentWriter) SetGraphProperty(path []string, key string, val any) error {
+func (w *contentWriter) SetGraphProperty(path []string, key string, val any) error {
 	data, err := json.Marshal(val)
 	if err != nil {
 		return fmt.Errorf("marshal graph property %q on path %v: %w", key, path, err)
@@ -181,7 +188,7 @@ func (w *ContentWriter) SetGraphProperty(path []string, key string, val any) err
 	return nil
 }
 
-func (w *ContentWriter) SetGraphDeprecation(path []string, message string) error {
+func (w *contentWriter) SetGraphDeprecation(path []string, message string) error {
 	p, err := graphPath(path)
 	if err != nil {
 		return err
@@ -196,27 +203,13 @@ func (w *ContentWriter) SetGraphDeprecation(path []string, message string) error
 	return nil
 }
 
-func (w *ContentWriter) SetBundleDeprecation(bundleID string, message string) error {
+func (w *contentWriter) SetBundleDeprecation(bundleID string, message string) error {
 	_, err := w.tx.Exec(
 		"UPDATE content_bundles SET deprecation_message = ? WHERE catalog_name = ? AND bundle_id = ?",
 		message, w.catalogName, bundleID,
 	)
 	if err != nil {
 		return fmt.Errorf("setting bundle deprecation on %q: %w", bundleID, err)
-	}
-	return nil
-}
-
-// DeleteCatalogContent deletes all content rows for a catalog name.
-// ON DELETE CASCADE on child tables handles cleanup automatically.
-func DeleteCatalogContent(tx *sql.Tx, catalogName string) error {
-	for _, stmt := range []string{
-		"DELETE FROM content_graphs WHERE catalog_name = ?",
-		"DELETE FROM content_bundles WHERE catalog_name = ?",
-	} {
-		if _, err := tx.Exec(stmt, catalogName); err != nil {
-			return fmt.Errorf("deleting catalog content for %q: %w", catalogName, err)
-		}
 	}
 	return nil
 }

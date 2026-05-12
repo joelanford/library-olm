@@ -1,4 +1,4 @@
-package catalogv1_test
+package sqlite_test
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/catalog/v1/sqlite"
 	testutil "github.com/joelanford/library-olm/internal/util/test"
 )
 
@@ -90,7 +91,7 @@ func nestedQueryImporter() catalogv1.Importer {
 
 func TestOpenStore_CreatesNewDB(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "new.db")
-	store, err := catalogv1.OpenStore(dbPath)
+	store, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -107,14 +108,14 @@ func TestOpenStore_ExistingDB(t *testing.T) {
 	ctx := context.Background()
 
 	// First open: insert data
-	store1, err := catalogv1.OpenStore(dbPath)
+	store1, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 	_, err = store1.Set(ctx, "cat1", catalogv1.WithURI("test://one"))
 	require.NoError(t, err)
 	require.NoError(t, store1.Close())
 
 	// Second open: data should persist
-	store2, err := catalogv1.OpenStore(dbPath)
+	store2, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store2.Close()) }()
 
@@ -573,7 +574,7 @@ func TestOpenStore_ContentSchemaRebuild(t *testing.T) {
 	ctx := context.Background()
 
 	// Open store, import content
-	store1, err := catalogv1.OpenStore(dbPath)
+	store1, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 	_, err = store1.Set(ctx, "cat",
 		catalogv1.WithURI("test://"),
@@ -592,7 +593,7 @@ func TestOpenStore_ContentSchemaRebuild(t *testing.T) {
 
 	// Reopen store: should detect version mismatch, rebuild content tables,
 	// and clear digests
-	store2, err := catalogv1.OpenStore(dbPath)
+	store2, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store2.Close()) }()
 
@@ -1014,7 +1015,7 @@ func TestSelect_Get(t *testing.T) {
 func newTempStore(t *testing.T) (catalogv1.Store, func()) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	store, err := catalogv1.OpenStore(dbPath)
+	store, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 	return store, func() { require.NoError(t, store.Close()) }
 }

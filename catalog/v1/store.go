@@ -6,8 +6,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
-const labelCatalogName = "olm.operatorframework.io/metadata.name"
-
 // Writer provides methods for inserting catalog content into a store.
 type Writer interface {
 	InsertBundle(id, pkg, version, release, uri string) error
@@ -59,47 +57,58 @@ type Store interface {
 }
 
 // SetOption configures a Set operation.
-type SetOption func(*setConfig)
+type SetOption func(*SetConfig)
 
-type setConfig struct {
-	uri      *string
-	priority *int
-	labels   *map[string]string
-	content  *contentConfig
+// SetConfig holds the resolved configuration for a Set operation.
+type SetConfig struct {
+	URI      *string
+	Priority *int
+	Labels   *map[string]string
+	Content  *ContentConfig
 }
 
-type contentConfig struct {
-	importer Importer
-	digest   string
+// ContentConfig holds the content importer and digest for a Set operation.
+type ContentConfig struct {
+	Importer Importer
+	Digest   string
+}
+
+// ApplySetOptions applies the given options and returns the resulting config.
+func ApplySetOptions(opts []SetOption) SetConfig {
+	var cfg SetConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg
 }
 
 // WithURI sets the URI for the catalog entry.
 func WithURI(uri string) SetOption {
-	return func(c *setConfig) {
-		c.uri = &uri
+	return func(c *SetConfig) {
+		c.URI = &uri
 	}
 }
 
 // WithPriority sets the priority for the catalog entry.
 func WithPriority(priority int) SetOption {
-	return func(c *setConfig) {
-		c.priority = &priority
+	return func(c *SetConfig) {
+		c.Priority = &priority
 	}
 }
 
 // WithLabels sets the labels for the catalog entry.
 func WithLabels(labels map[string]string) SetOption {
-	return func(c *setConfig) {
-		c.labels = &labels
+	return func(c *SetConfig) {
+		c.Labels = &labels
 	}
 }
 
 // WithContent sets the content importer and digest for the catalog entry.
 func WithContent(importer Importer, digest string) SetOption {
-	return func(c *setConfig) {
-		c.content = &contentConfig{
-			importer: importer,
-			digest:   digest,
+	return func(c *SetConfig) {
+		c.Content = &ContentConfig{
+			Importer: importer,
+			Digest:   digest,
 		}
 	}
 }

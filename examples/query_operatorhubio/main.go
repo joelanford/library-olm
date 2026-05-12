@@ -15,8 +15,9 @@ import (
 
 	registryv1 "github.com/joelanford/library-olm/bundle/registry/v1"
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
-	"github.com/joelanford/library-olm/catalog/fbc"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/catalog/v1/fbc"
+	"github.com/joelanford/library-olm/catalog/v1/sqlite"
 	"github.com/joelanford/library-olm/image"
 	imgbundle "github.com/joelanford/library-olm/image/bundle"
 	imgcatalog "github.com/joelanford/library-olm/image/catalog"
@@ -57,7 +58,7 @@ func run() error {
 	// Step 2: Open the extracted catalog as an FBC Catalog
 	log.Println("Loading catalog from filesystem into SQLite...")
 	start = time.Now()
-	store, err := catalogv1.OpenStore(filepath.Join(tmpDir, "catalog.db"))
+	store, err := sqlite.OpenStore(filepath.Join(tmpDir, "catalog.db"))
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}

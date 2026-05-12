@@ -10,8 +10,9 @@ import (
 	"testing/fstest"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
-	"github.com/joelanford/library-olm/catalog/fbc"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/catalog/v1/fbc"
+	"github.com/joelanford/library-olm/catalog/v1/sqlite"
 )
 
 func ExampleNewImporter() {
@@ -33,7 +34,7 @@ func ExampleNewImporter() {
 	dbPath := filepath.Join(os.TempDir(), "example-catalog.db")
 	defer func() { _ = os.Remove(dbPath) }()
 
-	store, err := catalogv1.OpenStore(dbPath)
+	store, err := sqlite.OpenStore(dbPath)
 	if err != nil {
 		log.Fatal(err)
 	}

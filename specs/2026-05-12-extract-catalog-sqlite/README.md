@@ -29,6 +29,8 @@ catalog/v1/
     metadata.go    — metadata migrations
     query.go       — graphQuery, compositeGraphQuery, bundleRow, query functions
     writer.go      — contentWriter (implements catalogv1.Writer), graphPath
+  fbc/             — FBC importer (NewImporter → catalogv1.Importer)
+    internal/      — raw table schema, ingest, handler dispatch
 ```
 
 `catalog/v1/sqlite` imports `catalog/v1` for the interfaces.
