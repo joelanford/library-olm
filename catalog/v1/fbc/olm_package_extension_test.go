@@ -13,9 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
-	"github.com/joelanford/library-olm/catalog/fbc"
-	"github.com/joelanford/library-olm/catalog/fbc/internal/testing/catalogfs"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/catalog/v1/fbc"
+	"github.com/joelanford/library-olm/catalog/v1/fbc/internal/testing/catalogfs"
+	"github.com/joelanford/library-olm/catalog/v1/sqlite"
 )
 
 type testOLMPackageExtension struct {
@@ -102,7 +103,7 @@ func TestOLMPackageExtension_EndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	ext := &testOLMPackageExtension{}
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -171,7 +172,7 @@ func TestOLMPackageExtension_CallbacksReceiveCorrectTypes(t *testing.T) {
 	ctx := context.Background()
 
 	ext := &testOLMPackageExtension{}
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -230,7 +231,7 @@ func TestOLMPackageExtension_ExtDataAccessible(t *testing.T) {
 		},
 	}
 
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -288,7 +289,7 @@ func TestOLMPackageExtension_FinalizeAccessesDeprecationsAndOthers(t *testing.T)
 		},
 	}
 
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -361,7 +362,7 @@ func TestOLMPackageExtension_ChannelEntries(t *testing.T) {
 		},
 	}
 
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -406,7 +407,7 @@ func TestOLMPackageExtension_FinalizeError(t *testing.T) {
 		failPackage:             "fail-op",
 	}
 
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -444,7 +445,7 @@ func TestOLMPackageExtension_NoExtension(t *testing.T) {
 		Build()
 	ctx := context.Background()
 
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -469,7 +470,7 @@ func TestProperties_DeletedOnStoreDelete(t *testing.T) {
 	ctx := context.Background()
 
 	ext := &testOLMPackageExtension{}
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -503,7 +504,7 @@ func TestProperties_RebuiltOnSchemaChange(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
 	ext := &testOLMPackageExtension{}
-	store, err := catalogv1.OpenStore(dbPath)
+	store, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 
 	imp := fbc.NewImporter(fsys, fbc.WithOLMPackageExtension(ext))
@@ -514,7 +515,7 @@ func TestProperties_RebuiltOnSchemaChange(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 
-	store2, err := catalogv1.OpenStore(dbPath)
+	store2, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store2.Close()) }()
 

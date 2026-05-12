@@ -1,12 +1,11 @@
-package internal
+package sqlite
 
 import (
 	"database/sql"
 	"fmt"
 )
 
-// ContentSchemaVersion is the current version of the content schema.
-const ContentSchemaVersion = 5
+const contentSchemaVersion = 5
 
 const contentSchemaSQL = `
 CREATE TABLE content_schema_version (
@@ -87,8 +86,7 @@ CREATE INDEX idx_content_successors_lookup ON content_successors(graph_id, from_
 CREATE INDEX idx_content_predecessor_ranges_lookup ON content_predecessor_ranges(graph_id);
 `
 
-// CreateContentTables creates the content schema tables in the database.
-func CreateContentTables(db *sql.DB) error {
+func createContentTables(db *sql.DB) error {
 	_, err := db.Exec(contentSchemaSQL)
 	if err != nil {
 		return fmt.Errorf("creating content tables: %w", err)
@@ -96,8 +94,6 @@ func CreateContentTables(db *sql.DB) error {
 	return nil
 }
 
-// contentTablesDropOrder lists content tables in reverse dependency order
-// for safe dropping with foreign keys enabled.
 var contentTablesDropOrder = []string{
 	"content_bundle_properties",
 	"content_graph_properties",
@@ -109,11 +105,7 @@ var contentTablesDropOrder = []string{
 	"content_schema_version",
 }
 
-// DropContentTables drops all content_% tables. It verifies that every
-// content_% table in the database is accounted for in the known list,
-// failing if an unknown table is found. Tables are dropped in reverse
-// dependency order so foreign key constraints are not violated.
-func DropContentTables(db *sql.DB) error {
+func dropContentTables(db *sql.DB) error {
 	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'content_%'")
 	if err != nil {
 		return fmt.Errorf("querying content tables: %w", err)
@@ -131,7 +123,7 @@ func DropContentTables(db *sql.DB) error {
 			return fmt.Errorf("scanning table name: %w", err)
 		}
 		if !known[name] {
-			return fmt.Errorf("unknown content table %q: update contentTablesDropOrder and ContentSchemaVersion", name)
+			return fmt.Errorf("unknown content table %q: update contentTablesDropOrder and contentSchemaVersion", name)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -146,10 +138,7 @@ func DropContentTables(db *sql.DB) error {
 	return nil
 }
 
-// CheckContentSchemaVersion returns true if the stored content schema version
-// matches ContentSchemaVersion. If the content_schema_version table does not
-// exist, it returns false with no error (triggering a rebuild).
-func CheckContentSchemaVersion(db *sql.DB) (bool, error) {
+func checkContentSchemaVersion(db *sql.DB) (bool, error) {
 	exists, err := tableExists(db, "content_schema_version")
 	if err != nil {
 		return false, fmt.Errorf("checking content schema table: %w", err)
@@ -161,13 +150,11 @@ func CheckContentSchemaVersion(db *sql.DB) (bool, error) {
 	if err := db.QueryRow("SELECT version FROM content_schema_version LIMIT 1").Scan(&version); err != nil {
 		return false, fmt.Errorf("querying content schema version: %w", err)
 	}
-	return version == ContentSchemaVersion, nil
+	return version == contentSchemaVersion, nil
 }
 
-// StoreContentSchemaVersion inserts the current content schema version into
-// the content_schema_version table.
-func StoreContentSchemaVersion(db *sql.DB) error {
-	_, err := db.Exec("INSERT INTO content_schema_version (version) VALUES (?)", ContentSchemaVersion)
+func storeContentSchemaVersion(db *sql.DB) error {
+	_, err := db.Exec("INSERT INTO content_schema_version (version) VALUES (?)", contentSchemaVersion)
 	if err != nil {
 		return fmt.Errorf("storing content schema version: %w", err)
 	}

@@ -13,6 +13,7 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/catalog/v1/sqlite"
 	testutil "github.com/joelanford/library-olm/internal/util/test"
 	resolverv1 "github.com/joelanford/library-olm/resolver/v1"
 )
@@ -113,7 +114,7 @@ func buildSubGraph(w catalogv1.Writer, pkg string, parentPath []string, sg graph
 func newTempStore(t *testing.T) (catalogv1.Store, func()) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	store, err := catalogv1.OpenStore(dbPath)
+	store, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 	return store, func() { require.NoError(t, store.Close()) }
 }

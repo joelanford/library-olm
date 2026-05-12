@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/joelanford/library-olm/catalog/fbc/internal/testing/catalogfs"
+	"github.com/joelanford/library-olm/catalog/v1/fbc/internal/testing/catalogfs"
 )
 
 func TestBuilder_DefaultDerivation(t *testing.T) {

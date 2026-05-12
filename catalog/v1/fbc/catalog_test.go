@@ -12,15 +12,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
-	"github.com/joelanford/library-olm/catalog/fbc"
-	"github.com/joelanford/library-olm/catalog/fbc/internal/testing/catalogfs"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/catalog/v1/fbc"
+	"github.com/joelanford/library-olm/catalog/v1/fbc/internal/testing/catalogfs"
+	"github.com/joelanford/library-olm/catalog/v1/sqlite"
 	testutil "github.com/joelanford/library-olm/internal/util/test"
 )
 
 func importCatalog(t *testing.T, ctx context.Context, fsys fstest.MapFS) (catalogv1.Catalog, catalogv1.Store, error) {
 	t.Helper()
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 
 	imp := fbc.NewImporter(fsys)
@@ -648,7 +649,7 @@ func TestImporter_MalformedPackageBlob(t *testing.T) {
 		Build()
 	ctx := context.Background()
 
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -694,7 +695,7 @@ func TestImporter_MalformedBlobEmptyPackage(t *testing.T) {
 		Build()
 	ctx := context.Background()
 
-	store, err := catalogv1.OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 

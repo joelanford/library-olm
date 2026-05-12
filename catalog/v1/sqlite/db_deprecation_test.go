@@ -1,4 +1,4 @@
-package catalogv1_test
+package sqlite_test
 
 import (
 	"context"
@@ -10,8 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/joelanford/library-olm/catalog/fbc"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/catalog/v1/fbc"
+	"github.com/joelanford/library-olm/catalog/v1/sqlite"
 )
 
 func deprecationCatalogFS() fstest.MapFS {
@@ -31,7 +32,7 @@ func deprecationCatalogFS() fstest.MapFS {
 
 func TestDeprecation_EndToEnd(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	store, err := catalogv1.OpenStore(dbPath)
+	store, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
@@ -111,7 +112,7 @@ func TestDeprecation_EndToEnd(t *testing.T) {
 
 func TestDeprecation_ContentSchemaVersionBump(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	store, err := catalogv1.OpenStore(dbPath)
+	store, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 

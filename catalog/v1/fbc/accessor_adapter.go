@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"iter"
 
-	"github.com/joelanford/library-olm/catalog/fbc/internal"
+	"github.com/joelanford/library-olm/catalog/v1/fbc/internal"
 )
 
 type packageAccessorAdapter struct {

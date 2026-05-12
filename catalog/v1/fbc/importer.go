@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 
-	"github.com/joelanford/library-olm/catalog/fbc/internal"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/catalog/v1/fbc/internal"
 )
 
 // Importer imports FBC (File-Based Catalog) content into a store via a Writer.

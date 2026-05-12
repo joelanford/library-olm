@@ -46,7 +46,7 @@
 - [ ] All tests moved to `catalog/v1/sqlite/` or updated to import
       `sqlite.OpenStore`
 - [ ] `examples/query_operatorhubio` updated
-- [ ] `catalog/fbc/` tests updated
+- [ ] `catalog/v1/fbc/` tests updated
 - [ ] `resolver/v1/` tests updated
 - [ ] `go build ./...` succeeds
 - [ ] All tests pass (`make test`)
