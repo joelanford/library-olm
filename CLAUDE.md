@@ -9,7 +9,8 @@ bundle/              — bundle types and transformations
   v1/                — bundle identity types (BundleID, NameVersionRelease, Bundle interface)
   registry/v1/       — registry+v1 bundle parsing (FromFS) and rendering (ToPlainManifests)
 catalog/             — catalog API, persistent store, formats, and querying
-  v1/                — catalog interfaces (Catalog, Store, Writer, Importer), SQLite-backed Store
+  v1/                — catalog interfaces (Catalog, Store, Writer, Importer)
+    sqlite/          — SQLite-backed Store implementation (OpenStore)
   fbc/               — FBC importer (NewImporter → catalogv1.Importer)
 image/               — OCI registry access and content unpacking
   bundle/            — bundle image handlers (registry+v1, Helm)
