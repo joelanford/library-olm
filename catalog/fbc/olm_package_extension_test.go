@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/operator-framework/operator-registry/alpha/declcfg"
@@ -18,6 +19,7 @@ import (
 )
 
 type testOLMPackageExtension struct {
+	mu                 sync.Mutex
 	onPackageCalls     []string
 	onChannelCalls     []string
 	onBundleCalls      []string
@@ -27,26 +29,36 @@ type testOLMPackageExtension struct {
 }
 
 func (e *testOLMPackageExtension) OnPackage(p declcfg.Package) (any, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.onPackageCalls = append(e.onPackageCalls, p.Name)
 	return map[string]string{"kind": "package", "name": p.Name}, nil
 }
 
 func (e *testOLMPackageExtension) OnChannel(ch declcfg.Channel) (any, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.onChannelCalls = append(e.onChannelCalls, ch.Name)
 	return map[string]string{"kind": "channel", "name": ch.Name}, nil
 }
 
 func (e *testOLMPackageExtension) OnBundle(b declcfg.Bundle) (any, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.onBundleCalls = append(e.onBundleCalls, b.Name)
 	return map[string]string{"kind": "bundle", "name": b.Name}, nil
 }
 
 func (e *testOLMPackageExtension) OnDeprecation(d declcfg.Deprecation) (any, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.onDeprecationCalls = append(e.onDeprecationCalls, d.Package)
 	return map[string]string{"kind": "deprecation", "package": d.Package}, nil
 }
 
 func (e *testOLMPackageExtension) OnOther(m declcfg.Meta) (any, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.onOtherCalls = append(e.onOtherCalls, m.Schema+"/"+m.Name)
 	return map[string]string{"kind": "other", "schema": m.Schema}, nil
 }
