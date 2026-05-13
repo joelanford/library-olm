@@ -1,5 +1,6 @@
 ---
-status: in-progress
+status: pr-submitted
+pr: https://github.com/joelanford/library-olm/pull/13
 ---
 # Resolver Deprecation
 
