@@ -58,11 +58,18 @@ func WithSuccessorsOf(from bundlev1.BundleIdentity) ResolveOption {
 	return withSuccessorsOf{from: from}
 }
 
+// Result holds the output of a Resolve call.
+type Result struct {
+	Catalog catalogv1.Catalog
+	Package catalogv1.UpdateGraph
+	Bundles []bundlev1.Bundle
+}
+
 // Resolve finds bundles matching the given criteria across all catalogs in the
 // reader, sorted by version descending. It selects the highest-priority catalog
 // containing the package and returns an ambiguity error if multiple catalogs at
 // the same priority have it.
-func Resolve(ctx context.Context, reader catalogv1.StoreReader, packageName string, opts ...ResolveOption) (catalogv1.Catalog, []bundlev1.Bundle, error) {
+func Resolve(ctx context.Context, reader catalogv1.StoreReader, packageName string, opts ...ResolveOption) (*Result, error) {
 	var cfg resolveConfig
 	for _, opt := range opts {
 		opt.applyResolveOption(&cfg)
@@ -70,28 +77,28 @@ func Resolve(ctx context.Context, reader catalogv1.StoreReader, packageName stri
 
 	catalogs, err := reader.List()
 	if err != nil {
-		return nil, nil, fmt.Errorf("listing catalogs: %w", err)
+		return nil, fmt.Errorf("listing catalogs: %w", err)
 	}
 
 	cat, pkg, err := selectPackage(ctx, catalogs, packageName)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if pkg == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	graphs, err := selectGraphs(ctx, pkg, cfg.graphs)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if len(graphs) == 0 {
-		return cat, nil, nil
+		return &Result{Catalog: cat, Package: pkg}, nil
 	}
 
 	bundles, err := collectBundles(ctx, graphs, cfg.from)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	bundles = filterByConstraint(bundles, cfg.constraint)
@@ -99,7 +106,7 @@ func Resolve(ctx context.Context, reader catalogv1.StoreReader, packageName stri
 	slices.SortFunc(bundles, func(a, b bundlev1.Bundle) int {
 		return b.NameVersionRelease().Compare(a.NameVersionRelease())
 	})
-	return cat, bundles, nil
+	return &Result{Catalog: cat, Package: pkg, Bundles: bundles}, nil
 }
 
 func selectPackage(ctx context.Context, catalogs []catalogv1.Catalog, packageName string) (catalogv1.Catalog, catalogv1.UpdateGraph, error) {

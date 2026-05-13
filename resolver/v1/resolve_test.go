@@ -148,9 +148,9 @@ func TestResolve_NoOptions(t *testing.T) {
 		subGraph("fast", []string{"2.0.0", "3.0.0"}),
 	))
 
-	_, bundles, err := resolverv1.Resolve(context.Background(), store, "pkg")
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg")
 	require.NoError(t, err)
-	ids := collectBundleIDs(t, bundles)
+	ids := collectBundleIDs(t, result.Bundles)
 	assert.Equal(t, []string{"pkg.v3.0.0", "pkg.v2.0.0", "pkg.v1.0.0"}, ids)
 }
 
@@ -163,11 +163,11 @@ func TestResolve_WithGraphs_Depth1(t *testing.T) {
 		subGraph("sg2", []string{"2.0.0", "3.0.0"}),
 	))
 
-	_, bundles, err := resolverv1.Resolve(context.Background(), store, "pkg",
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg1"}}),
 	)
 	require.NoError(t, err)
-	ids := collectBundleIDs(t, bundles)
+	ids := collectBundleIDs(t, result.Bundles)
 	assert.Equal(t, []string{"pkg.v2.0.0", "pkg.v1.0.0"}, ids)
 }
 
@@ -179,11 +179,11 @@ func TestResolve_WithGraphs_Nonexistent(t *testing.T) {
 		subGraph("stable", []string{"1.0.0"}),
 	))
 
-	_, bundles, err := resolverv1.Resolve(context.Background(), store, "pkg",
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg",
 		resolverv1.WithGraphs([][]string{{"nonexistent"}}),
 	)
 	require.NoError(t, err)
-	assert.Empty(t, bundles)
+	assert.Empty(t, result.Bundles)
 }
 
 func TestResolve_WithGraphs_MultiplePaths(t *testing.T) {
@@ -197,19 +197,19 @@ func TestResolve_WithGraphs_MultiplePaths(t *testing.T) {
 	))
 
 	// sg1 + sg2 = [1,2,3,4] — sg3 bundles excluded
-	_, bundles, err := resolverv1.Resolve(context.Background(), store, "pkg",
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg1"}, {"sg2"}}),
 	)
 	require.NoError(t, err)
-	ids := collectBundleIDs(t, bundles)
+	ids := collectBundleIDs(t, result.Bundles)
 	assert.Equal(t, []string{"pkg.v4.0.0", "pkg.v3.0.0", "pkg.v2.0.0", "pkg.v1.0.0"}, ids)
 
 	// sg1 only = [1,2] — sg2 and sg3 bundles excluded
-	_, bundles, err = resolverv1.Resolve(context.Background(), store, "pkg",
+	result, err = resolverv1.Resolve(context.Background(), store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg1"}}),
 	)
 	require.NoError(t, err)
-	ids = collectBundleIDs(t, bundles)
+	ids = collectBundleIDs(t, result.Bundles)
 	assert.Equal(t, []string{"pkg.v2.0.0", "pkg.v1.0.0"}, ids)
 }
 
@@ -223,11 +223,11 @@ func TestResolve_WithGraphs_Depth2(t *testing.T) {
 		),
 	))
 
-	_, bundles, err := resolverv1.Resolve(context.Background(), store, "pkg",
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg",
 		resolverv1.WithGraphs([][]string{{"stable", "lts"}}),
 	)
 	require.NoError(t, err)
-	ids := collectBundleIDs(t, bundles)
+	ids := collectBundleIDs(t, result.Bundles)
 	assert.Equal(t, []string{"pkg.v1.0.0"}, ids)
 }
 
@@ -242,11 +242,11 @@ func TestResolve_WithMastermindsVersionConstraint(t *testing.T) {
 	constraint, err := mmsemver.NewConstraint(">=1.0.0, <2.0.0")
 	require.NoError(t, err)
 
-	_, bundles, err := resolverv1.Resolve(context.Background(), store, "pkg",
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg",
 		resolverv1.WithMastermindsVersionConstraint(*constraint),
 	)
 	require.NoError(t, err)
-	ids := collectBundleIDs(t, bundles)
+	ids := collectBundleIDs(t, result.Bundles)
 	assert.Equal(t, []string{"pkg.v1.1.0", "pkg.v1.0.0"}, ids)
 }
 
@@ -264,11 +264,11 @@ func TestResolve_WithSuccessorsOf(t *testing.T) {
 	))
 
 	// 4.0.0 is reachable from 3.0.0 but not from 1.0.0, so it should be excluded
-	_, bundles, err := resolverv1.Resolve(context.Background(), store, "pkg",
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg",
 		resolverv1.WithSuccessorsOf(testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")),
 	)
 	require.NoError(t, err)
-	ids := collectBundleIDs(t, bundles)
+	ids := collectBundleIDs(t, result.Bundles)
 	assert.Equal(t, []string{"pkg.v3.0.0", "pkg.v2.0.0", "pkg.v1.1.0"}, ids)
 }
 
@@ -306,51 +306,51 @@ func TestResolve_WithGraphsAndSuccessorsOf(t *testing.T) {
 	from := testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")
 
 	// All successors of A (no graph filter) = [B, C, D]
-	_, bundles, err := resolverv1.Resolve(ctx, store, "pkg",
+	result, err := resolverv1.Resolve(ctx, store, "pkg",
 		resolverv1.WithSuccessorsOf(from),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"pkg.v4.0.0", "pkg.v3.0.0", "pkg.v2.0.0"}, collectBundleIDs(t, bundles))
+	assert.Equal(t, []string{"pkg.v4.0.0", "pkg.v3.0.0", "pkg.v2.0.0"}, collectBundleIDs(t, result.Bundles))
 
 	// sg1 -> [B]
-	_, bundles, err = resolverv1.Resolve(ctx, store, "pkg",
+	result, err = resolverv1.Resolve(ctx, store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg1"}}),
 		resolverv1.WithSuccessorsOf(from),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"pkg.v2.0.0"}, collectBundleIDs(t, bundles))
+	assert.Equal(t, []string{"pkg.v2.0.0"}, collectBundleIDs(t, result.Bundles))
 
 	// sg2 -> [D]
-	_, bundles, err = resolverv1.Resolve(ctx, store, "pkg",
+	result, err = resolverv1.Resolve(ctx, store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg2"}}),
 		resolverv1.WithSuccessorsOf(from),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"pkg.v4.0.0"}, collectBundleIDs(t, bundles))
+	assert.Equal(t, []string{"pkg.v4.0.0"}, collectBundleIDs(t, result.Bundles))
 
 	// sg3 -> [B, C]
-	_, bundles, err = resolverv1.Resolve(ctx, store, "pkg",
+	result, err = resolverv1.Resolve(ctx, store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg3"}}),
 		resolverv1.WithSuccessorsOf(from),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"pkg.v3.0.0", "pkg.v2.0.0"}, collectBundleIDs(t, bundles))
+	assert.Equal(t, []string{"pkg.v3.0.0", "pkg.v2.0.0"}, collectBundleIDs(t, result.Bundles))
 
 	// sg2 or sg3 -> [B, C, D]
-	_, bundles, err = resolverv1.Resolve(ctx, store, "pkg",
+	result, err = resolverv1.Resolve(ctx, store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg2"}, {"sg3"}}),
 		resolverv1.WithSuccessorsOf(from),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"pkg.v4.0.0", "pkg.v3.0.0", "pkg.v2.0.0"}, collectBundleIDs(t, bundles))
+	assert.Equal(t, []string{"pkg.v4.0.0", "pkg.v3.0.0", "pkg.v2.0.0"}, collectBundleIDs(t, result.Bundles))
 
 	// sg1 or sg2 -> [B, D]
-	_, bundles, err = resolverv1.Resolve(ctx, store, "pkg",
+	result, err = resolverv1.Resolve(ctx, store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg1"}, {"sg2"}}),
 		resolverv1.WithSuccessorsOf(from),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"pkg.v4.0.0", "pkg.v2.0.0"}, collectBundleIDs(t, bundles))
+	assert.Equal(t, []string{"pkg.v4.0.0", "pkg.v2.0.0"}, collectBundleIDs(t, result.Bundles))
 }
 
 func TestResolve_CombinedOptions(t *testing.T) {
@@ -384,39 +384,39 @@ func TestResolve_CombinedOptions(t *testing.T) {
 	from := testutil.NewBundleIdentity(t, "pkg", "1.0.0", "")
 
 	// No filter: all bundles
-	_, bundles, err := resolverv1.Resolve(ctx, store, "pkg")
+	result, err := resolverv1.Resolve(ctx, store, "pkg")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"pkg.v6.0.0", "pkg.v5.0.0", "pkg.v4.0.0", "pkg.v3.0.0", "pkg.v2.0.0", "pkg.v1.0.0"},
-		collectBundleIDs(t, bundles))
+		collectBundleIDs(t, result.Bundles))
 
 	// WithGraphs(sg1): F filtered out (only in sg2)
-	_, bundles, err = resolverv1.Resolve(ctx, store, "pkg",
+	result, err = resolverv1.Resolve(ctx, store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg1"}}),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"pkg.v5.0.0", "pkg.v4.0.0", "pkg.v3.0.0", "pkg.v2.0.0", "pkg.v1.0.0"},
-		collectBundleIDs(t, bundles))
+		collectBundleIDs(t, result.Bundles))
 
 	// + WithSuccessorsOf: E filtered out (D->E exists but A->E doesn't in sg1)
-	_, bundles, err = resolverv1.Resolve(ctx, store, "pkg",
+	result, err = resolverv1.Resolve(ctx, store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg1"}}),
 		resolverv1.WithSuccessorsOf(from),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"pkg.v4.0.0", "pkg.v3.0.0", "pkg.v2.0.0"},
-		collectBundleIDs(t, bundles))
+		collectBundleIDs(t, result.Bundles))
 
 	// + WithConstraint: D filtered out (4.0.0 doesn't match >=2.0.0 <4.0.0)
 	constraint, err := mmsemver.NewConstraint(">=2.0.0, <4.0.0")
 	require.NoError(t, err)
 
-	_, bundles, err = resolverv1.Resolve(ctx, store, "pkg",
+	result, err = resolverv1.Resolve(ctx, store, "pkg",
 		resolverv1.WithGraphs([][]string{{"sg1"}}),
 		resolverv1.WithSuccessorsOf(from),
 		resolverv1.WithMastermindsVersionConstraint(*constraint),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"pkg.v3.0.0", "pkg.v2.0.0"}, collectBundleIDs(t, bundles))
+	assert.Equal(t, []string{"pkg.v3.0.0", "pkg.v2.0.0"}, collectBundleIDs(t, result.Bundles))
 }
 
 func TestResolve_Priority(t *testing.T) {
@@ -442,10 +442,10 @@ func TestResolve_Priority(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	cat, bundles, err := resolverv1.Resolve(ctx, store, "pkg")
+	result, err := resolverv1.Resolve(ctx, store, "pkg")
 	require.NoError(t, err)
-	assert.Equal(t, "high-priority", cat.Name())
-	assert.Equal(t, []string{"pkg.v1.0.0"}, collectBundleIDs(t, bundles))
+	assert.Equal(t, "high-priority", result.Catalog.Name())
+	assert.Equal(t, []string{"pkg.v1.0.0"}, collectBundleIDs(t, result.Bundles))
 }
 
 func TestResolve_AmbiguityError(t *testing.T) {
@@ -471,7 +471,7 @@ func TestResolve_AmbiguityError(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	_, _, err = resolverv1.Resolve(ctx, store, "pkg")
+	_, err = resolverv1.Resolve(ctx, store, "pkg")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ambiguous")
 	assert.Contains(t, err.Error(), "cat-a")
@@ -494,7 +494,7 @@ func TestResolve_AmbiguityError_ThreeCatalogs(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	_, _, err := resolverv1.Resolve(ctx, store, "pkg")
+	_, err := resolverv1.Resolve(ctx, store, "pkg")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ambiguous")
 	assert.Contains(t, err.Error(), "[cat-a cat-b cat-c]")
@@ -532,7 +532,7 @@ func TestResolve_AmbiguitySkipsHigherPriorityGroup(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	_, _, err = resolverv1.Resolve(ctx, store, "pkg")
+	_, err = resolverv1.Resolve(ctx, store, "pkg")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ambiguous")
 	assert.Contains(t, err.Error(), "priority 5")
@@ -561,10 +561,10 @@ func TestResolve_HighPriorityGroupNoMatch_FallsToLower(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	cat, bundles, err := resolverv1.Resolve(ctx, store, "pkg")
+	result, err := resolverv1.Resolve(ctx, store, "pkg")
 	require.NoError(t, err)
-	assert.Equal(t, "low", cat.Name())
-	assert.Equal(t, []string{"pkg.v1.0.0"}, collectBundleIDs(t, bundles))
+	assert.Equal(t, "low", result.Catalog.Name())
+	assert.Equal(t, []string{"pkg.v1.0.0"}, collectBundleIDs(t, result.Bundles))
 }
 
 func TestResolve_NonexistentPackage(t *testing.T) {
@@ -575,10 +575,9 @@ func TestResolve_NonexistentPackage(t *testing.T) {
 		subGraph("stable", []string{"1.0.0"}),
 	))
 
-	cat, bundles, err := resolverv1.Resolve(context.Background(), store, "nonexistent-pkg")
+	result, err := resolverv1.Resolve(context.Background(), store, "nonexistent-pkg")
 	require.NoError(t, err)
-	assert.Nil(t, cat)
-	assert.Empty(t, bundles)
+	assert.Nil(t, result)
 }
 
 func TestResolve_Select(t *testing.T) {
@@ -607,7 +606,7 @@ func TestResolve_Select(t *testing.T) {
 	require.NoError(t, err)
 
 	// Without Select, same priority would be ambiguous
-	_, _, err = resolverv1.Resolve(ctx, store, "pkg")
+	_, err = resolverv1.Resolve(ctx, store, "pkg")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ambiguous")
 
@@ -615,8 +614,8 @@ func TestResolve_Select(t *testing.T) {
 	selector, err := labels.Parse("env=prod")
 	require.NoError(t, err)
 
-	cat, bundles, err := resolverv1.Resolve(ctx, store.Select(selector), "pkg")
+	result, err := resolverv1.Resolve(ctx, store.Select(selector), "pkg")
 	require.NoError(t, err)
-	assert.Equal(t, "prod-catalog", cat.Name())
-	assert.Equal(t, []string{"pkg.v1.0.0"}, collectBundleIDs(t, bundles))
+	assert.Equal(t, "prod-catalog", result.Catalog.Name())
+	assert.Equal(t, []string{"pkg.v1.0.0"}, collectBundleIDs(t, result.Bundles))
 }
