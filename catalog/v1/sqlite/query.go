@@ -15,6 +15,25 @@ import (
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 )
 
+type deprecation struct{ message string }
+
+func (d deprecation) DeprecationMessage() string { return d.message }
+
+type deprecatedUpdateGraph struct {
+	catalogv1.UpdateGraph
+	deprecation
+}
+
+type deprecatedCompositeUpdateGraph struct {
+	catalogv1.CompositeUpdateGraph
+	deprecation
+}
+
+type deprecatedBundle struct {
+	bundlev1.Bundle
+	deprecation
+}
+
 func tableExists(db *sql.DB, name string) (bool, error) {
 	var n int
 	err := db.QueryRow(
@@ -119,6 +138,25 @@ func queryGraphProperty(ctx context.Context, db *sql.DB, graphID int64, key stri
 	return json.RawMessage(val), nil
 }
 
+func newGraphQuery(db *sql.DB, catalogName string, id int64, name string, deprecationMsg *string) catalogv1.UpdateGraph {
+	gq := &graphQuery{db: db, catalogName: catalogName, graphID: id, graphName: name}
+	if deprecationMsg != nil {
+		return &deprecatedUpdateGraph{UpdateGraph: gq, deprecation: deprecation{message: *deprecationMsg}}
+	}
+	return gq
+}
+
+func newCompositeGraphQuery(db *sql.DB, catalogName string, id int64, name string, path []string, deprecationMsg *string) catalogv1.UpdateGraph {
+	cug := &compositeGraphQuery{
+		graphQuery: graphQuery{db: db, catalogName: catalogName, graphID: id, graphName: name},
+		graphPath:  path,
+	}
+	if deprecationMsg != nil {
+		return &deprecatedCompositeUpdateGraph{CompositeUpdateGraph: cug, deprecation: deprecation{message: *deprecationMsg}}
+	}
+	return cug
+}
+
 func queryGraphNodes(ctx context.Context, db *sql.DB, catalogName string, parentID *int64, name string, parentPath []string) iter.Seq2[catalogv1.UpdateGraph, error] {
 	where := `g.parent_id IS NULL AND g.catalog_name = ?`
 	args := []any{catalogName}
@@ -130,7 +168,7 @@ func queryGraphNodes(ctx context.Context, db *sql.DB, catalogName string, parent
 		where += ` AND g.name = ?`
 		args = append(args, name)
 	}
-	query := `SELECT g.id, g.name, EXISTS(SELECT 1 FROM content_graphs c WHERE c.parent_id = g.id)
+	query := `SELECT g.id, g.name, g.deprecation_message, EXISTS(SELECT 1 FROM content_graphs c WHERE c.parent_id = g.id)
 		 FROM content_graphs g WHERE ` + where + ` ORDER BY g.name`
 
 	return func(yield func(catalogv1.UpdateGraph, error) bool) {
@@ -143,8 +181,9 @@ func queryGraphNodes(ctx context.Context, db *sql.DB, catalogName string, parent
 		for rows.Next() {
 			var id int64
 			var nodeName string
+			var deprecationMsg *string
 			var hasChildren bool
-			if err := rows.Scan(&id, &nodeName, &hasChildren); err != nil {
+			if err := rows.Scan(&id, &nodeName, &deprecationMsg, &hasChildren); err != nil {
 				if !yield(nil, err) {
 					return
 				}
@@ -153,12 +192,9 @@ func queryGraphNodes(ctx context.Context, db *sql.DB, catalogName string, parent
 			path := append(slices.Clone(parentPath), nodeName)
 			var ug catalogv1.UpdateGraph
 			if hasChildren {
-				ug = &compositeGraphQuery{
-					graphQuery: graphQuery{db: db, catalogName: catalogName, graphID: id, graphName: nodeName},
-					graphPath:  path,
-				}
+				ug = newCompositeGraphQuery(db, catalogName, id, nodeName, path, deprecationMsg)
 			} else {
-				ug = &graphQuery{db: db, catalogName: catalogName, graphID: id, graphName: nodeName}
+				ug = newGraphQuery(db, catalogName, id, nodeName, deprecationMsg)
 			}
 			if !yield(ug, nil) {
 				return
@@ -179,7 +215,7 @@ func queryGraphNode(ctx context.Context, db *sql.DB, catalogName string, parentI
 
 func queryBundlesDirect(ctx context.Context, db *sql.DB, catalogName string, graphID int64) iter.Seq2[bundlev1.Bundle, error] {
 	return streamBundleRows(ctx, db, catalogName, `
-		SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri
+		SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, b.deprecation_message
 		FROM content_graph_bundles gb
 		JOIN content_bundles b ON b.id = gb.bundle_id
 		WHERE gb.graph_id = ? AND b.version != ''
@@ -193,7 +229,7 @@ func queryBundlesDescendant(ctx context.Context, db *sql.DB, catalogName string,
 			UNION ALL
 			SELECT g.id FROM content_graphs g JOIN descendants d ON g.parent_id = d.id
 		)
-		SELECT DISTINCT b.bundle_id, b.package_name, b.version, b.release, b.uri
+		SELECT DISTINCT b.bundle_id, b.package_name, b.version, b.release, b.uri, b.deprecation_message
 		FROM content_graph_bundles gb
 		JOIN content_bundles b ON b.id = gb.bundle_id
 		WHERE gb.graph_id IN (SELECT id FROM descendants) AND b.version != ''
@@ -210,14 +246,14 @@ func streamBundleRows(ctx context.Context, db *sql.DB, catalogName, query string
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var id, packageName, versionStr, releaseStr, uri string
-			if err := rows.Scan(&id, &packageName, &versionStr, &releaseStr, &uri); err != nil {
+			var deprecationMsg *string
+			if err := rows.Scan(&id, &packageName, &versionStr, &releaseStr, &uri, &deprecationMsg); err != nil {
 				if !yield(nil, err) {
 					return
 				}
 				continue
 			}
-			b, err := parseBundleRow(db, catalogName, id, packageName, versionStr, releaseStr, uri)
-			if !yield(b, err) {
+			if !yield(parseBundleRow(db, catalogName, id, packageName, versionStr, releaseStr, uri, deprecationMsg)) {
 				return
 			}
 		}
@@ -229,12 +265,12 @@ func streamBundleRows(ctx context.Context, db *sql.DB, catalogName, query string
 
 func querySuccessorsDirect(ctx context.Context, db *sql.DB, catalogName string, graphID int64, fromID bundlev1.BundleID, fromVersion bsemver.Version) iter.Seq2[bundlev1.Bundle, error] {
 	return querySuccessorsStreaming(ctx, db, catalogName,
-		`SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri
+		`SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, b.deprecation_message
 		 FROM content_successors s
 		 JOIN content_bundles b ON b.id = s.to_bundle_id
 		 WHERE s.graph_id = ? AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE bundle_id = ?)`,
 		[]any{graphID, string(fromID)},
-		`SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, pc.version_range
+		`SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, b.deprecation_message, pc.version_range
 		 FROM content_predecessor_ranges pc
 		 JOIN content_bundles b ON b.id = pc.bundle_id
 		 WHERE pc.graph_id = ?`,
@@ -251,14 +287,14 @@ func querySuccessorsDescendant(ctx context.Context, db *sql.DB, catalogName stri
 	)`
 	return querySuccessorsStreaming(ctx, db, catalogName,
 		descendantCTE+`
-		SELECT DISTINCT b.bundle_id, b.package_name, b.version, b.release, b.uri
+		SELECT DISTINCT b.bundle_id, b.package_name, b.version, b.release, b.uri, b.deprecation_message
 		FROM content_successors s
 		JOIN content_bundles b ON b.id = s.to_bundle_id
 		WHERE s.graph_id IN (SELECT id FROM descendants)
 		  AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE bundle_id = ?)`,
 		[]any{graphID, string(fromID)},
 		descendantCTE+`
-		SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, pc.version_range
+		SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, b.deprecation_message, pc.version_range
 		FROM content_predecessor_ranges pc
 		JOIN content_bundles b ON b.id = pc.bundle_id
 		WHERE pc.graph_id IN (SELECT id FROM descendants)`,
@@ -283,7 +319,8 @@ func querySuccessorsStreaming(
 		}
 		for rows.Next() {
 			var id, packageName, versionStr, releaseStr, uri string
-			if err := rows.Scan(&id, &packageName, &versionStr, &releaseStr, &uri); err != nil {
+			var deprecationMsg *string
+			if err := rows.Scan(&id, &packageName, &versionStr, &releaseStr, &uri, &deprecationMsg); err != nil {
 				if !yield(nil, err) {
 					_ = rows.Close()
 					return
@@ -291,8 +328,7 @@ func querySuccessorsStreaming(
 				continue
 			}
 			seen[id] = true
-			b, err := parseBundleRow(db, catalogName, id, packageName, versionStr, releaseStr, uri)
-			if !yield(b, err) {
+			if !yield(parseBundleRow(db, catalogName, id, packageName, versionStr, releaseStr, uri, deprecationMsg)) {
 				_ = rows.Close()
 				return
 			}
@@ -312,7 +348,8 @@ func querySuccessorsStreaming(
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var bid, packageName, versionStr, releaseStr, uri, rangeStr string
-			if err := rows.Scan(&bid, &packageName, &versionStr, &releaseStr, &uri, &rangeStr); err != nil {
+			var deprecationMsg *string
+			if err := rows.Scan(&bid, &packageName, &versionStr, &releaseStr, &uri, &deprecationMsg, &rangeStr); err != nil {
 				if !yield(nil, err) {
 					return
 				}
@@ -332,8 +369,7 @@ func querySuccessorsStreaming(
 				continue
 			}
 			seen[bid] = true
-			b, err := parseBundleRow(db, catalogName, bid, packageName, versionStr, releaseStr, uri)
-			if !yield(b, err) {
+			if !yield(parseBundleRow(db, catalogName, bid, packageName, versionStr, releaseStr, uri, deprecationMsg)) {
 				return
 			}
 		}
@@ -343,16 +379,16 @@ func querySuccessorsStreaming(
 	}
 }
 
-func parseBundleRow(db *sql.DB, catalogName, id, packageName, versionStr, releaseStr, uri string) (bundleRow, error) {
+func parseBundleRow(db *sql.DB, catalogName, id, packageName, versionStr, releaseStr, uri string, deprecationMsg *string) (bundlev1.Bundle, error) {
 	var ver bsemver.Version
 	if versionStr != "" {
 		parsed, err := bsemver.Parse(versionStr)
 		if err != nil {
-			return bundleRow{}, fmt.Errorf("parse version %q: %w", versionStr, err)
+			return nil, fmt.Errorf("parse version %q: %w", versionStr, err)
 		}
 		ver = parsed
 	}
-	return bundleRow{
+	b := bundleRow{
 		DB:          db,
 		CatalogName: catalogName,
 		BundleID:    bundlev1.BundleID(id),
@@ -360,5 +396,9 @@ func parseBundleRow(db *sql.DB, catalogName, id, packageName, versionStr, releas
 		Version:     ver,
 		Release:     bundlev1.MustParseRelease(releaseStr),
 		BundleURI:   uri,
-	}, nil
+	}
+	if deprecationMsg != nil {
+		return deprecatedBundle{Bundle: b, deprecation: deprecation{message: *deprecationMsg}}, nil
+	}
+	return b, nil
 }

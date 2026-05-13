@@ -31,6 +31,12 @@ type CompositeUpdateGraph interface {
 	GetGraph(ctx context.Context, name string) (UpdateGraph, error)
 }
 
+// Deprecated is implemented by UpdateGraph and Bundle values that carry a
+// deprecation message. Callers discover deprecation via type assertion.
+type Deprecated interface {
+	DeprecationMessage() string
+}
+
 // Catalog is the top-level entry point for querying a catalog.
 // Each package is represented as an UpdateGraph. Implementations backed
 // by formats with channel concepts (e.g., FBC) return CompositeUpdateGraphs
