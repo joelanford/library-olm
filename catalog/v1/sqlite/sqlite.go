@@ -390,3 +390,7 @@ var _ catalogv1.CompositeUpdateGraph = (*compositeGraphQuery)(nil)
 var _ catalogv1.UpdateGraph = (*graphQuery)(nil)
 var _ catalogv1.Writer = (*contentWriter)(nil)
 var _ bundlev1.Bundle = bundleRow{}
+var _ catalogv1.Deprecated = deprecation{}
+var _ catalogv1.Deprecated = (*deprecatedUpdateGraph)(nil)
+var _ catalogv1.Deprecated = (*deprecatedCompositeUpdateGraph)(nil)
+var _ catalogv1.Deprecated = deprecatedBundle{}
