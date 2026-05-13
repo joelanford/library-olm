@@ -30,6 +30,14 @@ type graphOption struct {
 
 type edge struct{ from, to string }
 type predRange struct{ bundle, versionRange string }
+type graphDeprecation struct {
+	path    []string
+	message string
+}
+type bundleDeprecation struct {
+	bundleID string
+	message  string
+}
 
 type graphCfg func(*graphOption)
 
@@ -53,14 +61,38 @@ func subGraph(name string, bundles []string, opts ...graphCfg) graphOption {
 	return g
 }
 
+type importerCfg func(*graphImporter)
+
+func withGraphDeprecation(path []string, message string) importerCfg {
+	return func(g *graphImporter) {
+		g.graphDeprecations = append(g.graphDeprecations, graphDeprecation{path: path, message: message})
+	}
+}
+
+func withBundleDeprecation(bundleID, message string) importerCfg {
+	return func(g *graphImporter) {
+		g.bundleDeprecations = append(g.bundleDeprecations, bundleDeprecation{bundleID: bundleID, message: message})
+	}
+}
+
 func graph(pkg string, bundles []string, subGraphs ...graphOption) catalogv1.Importer {
-	return &graphImporter{pkg: pkg, bundles: bundles, subGraphs: subGraphs}
+	return graphWithOpts(pkg, bundles, subGraphs)
+}
+
+func graphWithOpts(pkg string, bundles []string, subGraphs []graphOption, opts ...importerCfg) catalogv1.Importer {
+	g := &graphImporter{pkg: pkg, bundles: bundles, subGraphs: subGraphs}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
 }
 
 type graphImporter struct {
-	pkg       string
-	bundles   []string
-	subGraphs []graphOption
+	pkg                string
+	bundles            []string
+	subGraphs          []graphOption
+	graphDeprecations  []graphDeprecation
+	bundleDeprecations []bundleDeprecation
 }
 
 func (g *graphImporter) Import(_ context.Context, w catalogv1.Writer) error {
@@ -75,6 +107,16 @@ func (g *graphImporter) Import(_ context.Context, w catalogv1.Writer) error {
 	}
 	for _, sg := range g.subGraphs {
 		if err := buildSubGraph(w, g.pkg, []string{g.pkg}, sg); err != nil {
+			return err
+		}
+	}
+	for _, d := range g.graphDeprecations {
+		if err := w.SetGraphDeprecation(d.path, d.message); err != nil {
+			return err
+		}
+	}
+	for _, d := range g.bundleDeprecations {
+		if err := w.SetBundleDeprecation(d.bundleID, d.message); err != nil {
 			return err
 		}
 	}
