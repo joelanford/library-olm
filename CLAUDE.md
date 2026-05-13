@@ -67,6 +67,7 @@ Ideas have only a `README.md`. Refined work items have four files:
 | `/sdd-implement` | Implement a refined work item from its spec |
 | `/sdd-review` | Review changes for correctness and consistency |
 | `/sdd-ship` | Verify, commit, push, create PR, and monitor CI |
+| `/sdd-cleanup` | Archive done specs, backfill PR links, flag stale ideas |
 
 ## Governing Specs
 
