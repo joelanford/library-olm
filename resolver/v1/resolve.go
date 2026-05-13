@@ -21,9 +21,10 @@ type ResolveOption interface {
 }
 
 type resolveConfig struct {
-	graphs     [][]string
-	constraint *mmsemver.Constraints
-	from       bundlev1.BundleIdentity
+	graphs                     [][]string
+	constraint                 *mmsemver.Constraints
+	from                       bundlev1.BundleIdentity
+	preferNonDeprecatedBundles bool
 }
 
 type withGraphs struct{ paths [][]string }
@@ -56,6 +57,19 @@ func (o withSuccessorsOf) applyResolveOption(c *resolveConfig) { c.from = o.from
 // of the given bundle.
 func WithSuccessorsOf(from bundlev1.BundleIdentity) ResolveOption {
 	return withSuccessorsOf{from: from}
+}
+
+type preferNonDeprecatedBundles struct{}
+
+func (preferNonDeprecatedBundles) applyResolveOption(c *resolveConfig) {
+	c.preferNonDeprecatedBundles = true
+}
+
+// PreferNonDeprecatedBundles sorts non-deprecated bundles before deprecated
+// bundles in the result. Within each group, bundles are sorted by version
+// descending.
+func PreferNonDeprecatedBundles() ResolveOption {
+	return preferNonDeprecatedBundles{}
 }
 
 // Result holds the output of a Resolve call.
@@ -102,10 +116,7 @@ func Resolve(ctx context.Context, reader catalogv1.StoreReader, packageName stri
 	}
 
 	bundles = filterByConstraint(bundles, cfg.constraint)
-
-	slices.SortFunc(bundles, func(a, b bundlev1.Bundle) int {
-		return b.NameVersionRelease().Compare(a.NameVersionRelease())
-	})
+	sortBundles(bundles, cfg.preferNonDeprecatedBundles)
 	return &Result{Catalog: cat, Package: pkg, Bundles: bundles}, nil
 }
 
@@ -220,6 +231,35 @@ func collectBundles(ctx context.Context, graphs []catalogv1.UpdateGraph, from bu
 		}
 	}
 	return result, nil
+}
+
+func sortBundles(bundles []bundlev1.Bundle, preferNonDeprecated bool) {
+	if !preferNonDeprecated {
+		slices.SortFunc(bundles, cmpVersionDesc)
+		return
+	}
+	slices.SortFunc(bundles, func(a, b bundlev1.Bundle) int {
+		if c := cmpDeprecation(a, b); c != 0 {
+			return c
+		}
+		return cmpVersionDesc(a, b)
+	})
+}
+
+func cmpVersionDesc(a, b bundlev1.Bundle) int {
+	return b.NameVersionRelease().Compare(a.NameVersionRelease())
+}
+
+func cmpDeprecation(a, b bundlev1.Bundle) int {
+	_, aDepr := a.(catalogv1.Deprecated)
+	_, bDepr := b.(catalogv1.Deprecated)
+	if aDepr == bDepr {
+		return 0
+	}
+	if aDepr {
+		return 1
+	}
+	return -1
 }
 
 func filterByConstraint(bundles []bundlev1.Bundle, constraint *mmsemver.Constraints) []bundlev1.Bundle {
