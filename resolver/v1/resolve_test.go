@@ -661,3 +661,120 @@ func TestResolve_Select(t *testing.T) {
 	assert.Equal(t, "prod-catalog", result.Catalog.Name())
 	assert.Equal(t, []string{"pkg.v1.0.0"}, collectBundleIDs(t, result.Bundles))
 }
+
+func TestResolve_DeprecatedPackage(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+
+	importGraph(t, store, graphWithOpts("pkg", []string{"1.0.0"},
+		[]graphOption{subGraph("stable", []string{"1.0.0"})},
+		withGraphDeprecation([]string{"pkg"}, "package pkg is deprecated"),
+	))
+
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg")
+	require.NoError(t, err)
+
+	d, ok := result.Package.(catalogv1.Deprecated)
+	require.True(t, ok)
+	assert.Equal(t, "package pkg is deprecated", d.DeprecationMessage())
+}
+
+func TestResolve_DeprecatedBundle(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+
+	importGraph(t, store, graphWithOpts("pkg", []string{"1.0.0", "2.0.0"},
+		[]graphOption{subGraph("stable", []string{"1.0.0", "2.0.0"})},
+		withBundleDeprecation("pkg.v1.0.0", "bundle v1.0.0 is deprecated"),
+	))
+
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg")
+	require.NoError(t, err)
+	require.Len(t, result.Bundles, 2)
+
+	// v2.0.0 first (version descending), not deprecated
+	_, ok := result.Bundles[0].(catalogv1.Deprecated)
+	assert.False(t, ok)
+
+	// v1.0.0 second, deprecated
+	d, ok := result.Bundles[1].(catalogv1.Deprecated)
+	require.True(t, ok)
+	assert.Equal(t, "bundle v1.0.0 is deprecated", d.DeprecationMessage())
+}
+
+func TestResolve_DeprecatedChannel(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+
+	importGraph(t, store, graphWithOpts("pkg", []string{"1.0.0", "2.0.0"},
+		[]graphOption{
+			subGraph("stable", []string{"1.0.0"}),
+			subGraph("preview", []string{"2.0.0"}),
+		},
+		withGraphDeprecation([]string{"pkg", "preview"}, "preview channel is deprecated"),
+	))
+
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg")
+	require.NoError(t, err)
+
+	composite, ok := result.Package.(catalogv1.CompositeUpdateGraph)
+	require.True(t, ok)
+
+	// stable channel — not deprecated
+	stable, err := composite.GetGraph(context.Background(), "stable")
+	require.NoError(t, err)
+	_, ok = stable.(catalogv1.Deprecated)
+	assert.False(t, ok)
+
+	// preview channel — deprecated
+	preview, err := composite.GetGraph(context.Background(), "preview")
+	require.NoError(t, err)
+	d, ok := preview.(catalogv1.Deprecated)
+	require.True(t, ok)
+	assert.Equal(t, "preview channel is deprecated", d.DeprecationMessage())
+}
+
+func TestResolve_NonDeprecated(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+
+	importGraph(t, store, graph("pkg", []string{"1.0.0"},
+		subGraph("stable", []string{"1.0.0"}),
+	))
+
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg")
+	require.NoError(t, err)
+
+	_, ok := result.Package.(catalogv1.Deprecated)
+	assert.False(t, ok)
+
+	require.Len(t, result.Bundles, 1)
+	_, ok = result.Bundles[0].(catalogv1.Deprecated)
+	assert.False(t, ok)
+}
+
+func TestResolve_PreferNonDeprecatedBundles(t *testing.T) {
+	store, cleanup := newTempStore(t)
+	defer cleanup()
+
+	// v3.0.0 deprecated, v2.0.0 not deprecated, v1.0.0 deprecated
+	importGraph(t, store, graphWithOpts("pkg", []string{"1.0.0", "2.0.0", "3.0.0"},
+		[]graphOption{subGraph("stable", []string{"1.0.0", "2.0.0", "3.0.0"})},
+		withBundleDeprecation("pkg.v3.0.0", "deprecated"),
+		withBundleDeprecation("pkg.v1.0.0", "deprecated"),
+	))
+
+	// Without the option: version descending regardless of deprecation
+	result, err := resolverv1.Resolve(context.Background(), store, "pkg")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"pkg.v3.0.0", "pkg.v2.0.0", "pkg.v1.0.0"},
+		collectBundleIDs(t, result.Bundles))
+
+	// With the option: non-deprecated first, then deprecated, each version descending
+	result, err = resolverv1.Resolve(context.Background(), store, "pkg",
+		resolverv1.PreferNonDeprecatedBundles(),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"pkg.v2.0.0", "pkg.v3.0.0", "pkg.v1.0.0"},
+		collectBundleIDs(t, result.Bundles))
+}
