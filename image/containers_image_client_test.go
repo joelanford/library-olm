@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/signature"
 	"go.podman.io/image/v5/types"
 
 	"github.com/joelanford/library-olm/image/internal/testutil"
@@ -21,15 +23,19 @@ import (
 type fakeImageSource struct {
 	manifests map[string]testutil.FakeManifest // nil key → primary manifest
 	blobs     map[string][]byte
+	ref       types.ImageReference
 	closeErr  error
 	closed    bool
 }
 
 func newFakeImageSource() *fakeImageSource {
-	return &fakeImageSource{
+	ref, _ := reference.ParseNormalizedNamed("example.com/test:latest")
+	src := &fakeImageSource{
 		manifests: make(map[string]testutil.FakeManifest),
 		blobs:     make(map[string][]byte),
 	}
+	src.ref = &fakeImageReference{ref: ref, imgSrc: src}
+	return src
 }
 
 func (f *fakeImageSource) setPrimaryManifest(data []byte, mediaType string) {
@@ -40,7 +46,7 @@ func (f *fakeImageSource) setManifest(dgst digest.Digest, data []byte, mediaType
 	f.manifests[dgst.String()] = testutil.FakeManifest{Bytes: data, MediaType: mediaType}
 }
 
-func (f *fakeImageSource) Reference() types.ImageReference { return nil }
+func (f *fakeImageSource) Reference() types.ImageReference { return f.ref }
 
 func (f *fakeImageSource) Close() error {
 	f.closed = true
@@ -77,19 +83,26 @@ func (f *fakeImageSource) LayerInfosForCopy(_ context.Context, _ *digest.Digest)
 	return nil, nil
 }
 
+type fakeTransport struct{}
+
+func (fakeTransport) Name() string                                        { return "fake" }
+func (fakeTransport) ParseReference(string) (types.ImageReference, error) { return nil, nil }
+func (fakeTransport) ValidatePolicyConfigurationScope(string) error       { return nil }
+
 // fakeImageReference implements types.ImageReference for testing NewContainersImageRepository.
 type fakeImageReference struct {
-	ref       reference.Named
-	imgSrc    types.ImageSource
-	srcErr    error
-	transport types.ImageTransport
+	ref    reference.Named
+	imgSrc types.ImageSource
+	srcErr error
 }
 
-func (f *fakeImageReference) Transport() types.ImageTransport         { return f.transport }
-func (f *fakeImageReference) StringWithinTransport() string           { return "" }
-func (f *fakeImageReference) DockerReference() reference.Named        { return f.ref }
-func (f *fakeImageReference) PolicyConfigurationIdentity() string     { return "" }
-func (f *fakeImageReference) PolicyConfigurationNamespaces() []string { return nil }
+func (f *fakeImageReference) Transport() types.ImageTransport     { return fakeTransport{} }
+func (f *fakeImageReference) StringWithinTransport() string       { return "" }
+func (f *fakeImageReference) DockerReference() reference.Named    { return f.ref }
+func (f *fakeImageReference) PolicyConfigurationIdentity() string { return f.ref.Name() }
+func (f *fakeImageReference) PolicyConfigurationNamespaces() []string {
+	return []string{reference.Domain(f.ref)}
+}
 func (f *fakeImageReference) DeleteImage(_ context.Context, _ *types.SystemContext) error {
 	return nil
 }
@@ -97,10 +110,39 @@ func (f *fakeImageReference) NewImage(_ context.Context, _ *types.SystemContext)
 	return nil, fmt.Errorf("not implemented")
 }
 func (f *fakeImageReference) NewImageSource(_ context.Context, _ *types.SystemContext) (types.ImageSource, error) {
+	if f.imgSrc != nil {
+		if src, ok := f.imgSrc.(*fakeImageSource); ok && src.ref == nil {
+			src.ref = f
+		}
+	}
 	return f.imgSrc, f.srcErr
 }
 func (f *fakeImageReference) NewImageDestination(_ context.Context, _ *types.SystemContext) (types.ImageDestination, error) {
 	return nil, fmt.Errorf("not implemented")
+}
+
+func mustPolicy(t *testing.T, json string) *signature.Policy {
+	t.Helper()
+	policy, err := signature.NewPolicyFromBytes([]byte(json))
+	require.NoError(t, err)
+	return policy
+}
+
+func insecureAcceptAllPolicy(t *testing.T) *signature.Policy {
+	t.Helper()
+	return mustPolicy(t, `{"default":[{"type":"insecureAcceptAnything"}]}`)
+}
+
+func rejectAllPolicy(t *testing.T) *signature.Policy {
+	t.Helper()
+	return mustPolicy(t, `{"default":[{"type":"reject"}]}`)
+}
+
+func skipVerificationPolicyContext(t *testing.T) *signature.PolicyContext {
+	t.Helper()
+	pc, err := VerifyNever(nil)
+	require.NoError(t, err)
+	return pc
 }
 
 func TestNewContainersImageRepository(t *testing.T) {
@@ -111,7 +153,7 @@ func TestNewContainersImageRepository(t *testing.T) {
 		src := newFakeImageSource()
 		imgRef := &fakeImageReference{ref: ref, imgSrc: src}
 
-		repo, err := NewContainersImageRepository(ctx, imgRef, nil)
+		repo, err := NewContainersImageRepository(ctx, imgRef, nil, WithSignatureVerification(VerifyNever))
 		require.NoError(t, err)
 		assert.Equal(t, ref.String(), repo.Named().String())
 	})
@@ -119,7 +161,7 @@ func TestNewContainersImageRepository(t *testing.T) {
 	t.Run("ImageSourceError", func(t *testing.T) {
 		imgRef := &fakeImageReference{ref: ref, srcErr: fmt.Errorf("source error")}
 
-		_, err := NewContainersImageRepository(ctx, imgRef, nil)
+		_, err := NewContainersImageRepository(ctx, imgRef, nil, WithSignatureVerification(VerifyNever))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "source error")
 	})
@@ -135,7 +177,7 @@ func TestContainersImageRepository_Resolve(t *testing.T) {
 		})
 		src.setPrimaryManifest(manifestData, ocispecv1.MediaTypeImageManifest)
 
-		client := &ContainersImageRepository{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src, policyContext: skipVerificationPolicyContext(t)}
 
 		desc, err := client.Resolve(ctx)
 		require.NoError(t, err)
@@ -146,7 +188,7 @@ func TestContainersImageRepository_Resolve(t *testing.T) {
 
 	t.Run("GetManifestError", func(t *testing.T) {
 		src := newFakeImageSource()
-		client := &ContainersImageRepository{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src, policyContext: skipVerificationPolicyContext(t)}
 
 		_, err := client.Resolve(ctx)
 		require.Error(t, err)
@@ -161,7 +203,7 @@ func TestContainersImageRepository_Resolve(t *testing.T) {
 			ocispecv1.MediaTypeImageManifest,
 		)
 
-		client := &ContainersImageRepository{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src, policyContext: skipVerificationPolicyContext(t)}
 
 		_, err := client.Resolve(ctx)
 		require.Error(t, err)
@@ -179,7 +221,7 @@ func TestContainersImageRepository_FetchManifest(t *testing.T) {
 		dgst := digest.FromBytes(manifestData)
 		src.setManifest(dgst, manifestData, ocispecv1.MediaTypeImageManifest)
 
-		client := &ContainersImageRepository{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src, policyContext: skipVerificationPolicyContext(t)}
 
 		got, mediaType, err := client.FetchManifest(ctx, ocispecv1.Descriptor{Digest: dgst})
 		require.NoError(t, err)
@@ -189,7 +231,7 @@ func TestContainersImageRepository_FetchManifest(t *testing.T) {
 
 	t.Run("NotFound", func(t *testing.T) {
 		src := newFakeImageSource()
-		client := &ContainersImageRepository{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src, policyContext: skipVerificationPolicyContext(t)}
 
 		_, _, err := client.FetchManifest(ctx, ocispecv1.Descriptor{Digest: digest.FromString("missing")})
 		require.Error(t, err)
@@ -205,7 +247,7 @@ func TestContainersImageRepository_FetchBlob(t *testing.T) {
 		dgst := digest.FromBytes(blobData)
 		src.blobs[dgst.String()] = blobData
 
-		client := &ContainersImageRepository{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src, policyContext: skipVerificationPolicyContext(t)}
 
 		desc := ocispecv1.Descriptor{Digest: dgst, Size: int64(len(blobData))}
 		reader, err := client.FetchBlob(ctx, desc)
@@ -219,7 +261,7 @@ func TestContainersImageRepository_FetchBlob(t *testing.T) {
 
 	t.Run("NotFound", func(t *testing.T) {
 		src := newFakeImageSource()
-		client := &ContainersImageRepository{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src, policyContext: skipVerificationPolicyContext(t)}
 
 		_, err := client.FetchBlob(ctx, ocispecv1.Descriptor{Digest: digest.FromString("missing")})
 		require.Error(t, err)
@@ -232,7 +274,7 @@ func TestContainersImageRepository_FetchBlob(t *testing.T) {
 		dgst := digest.FromBytes(blobData)
 		src.blobs[dgst.String()] = blobData
 
-		client := &ContainersImageRepository{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src, policyContext: skipVerificationPolicyContext(t)}
 
 		// Descriptor claims more bytes than actually available — VerifyReader
 		// detects the premature EOF via its size check.
@@ -245,10 +287,140 @@ func TestContainersImageRepository_FetchBlob(t *testing.T) {
 	})
 }
 
+func TestNewContainersImageRepository_SignatureVerification(t *testing.T) {
+	ctx := context.Background()
+	ref, _ := reference.ParseNormalizedNamed("example.com/test:latest")
+
+	t.Run("DefaultFailsWithoutPolicyFile", func(t *testing.T) {
+		sysCtx := &types.SystemContext{SignaturePolicyPath: "/nonexistent/policy.json"}
+		src := newFakeImageSource()
+		imgRef := &fakeImageReference{ref: ref, imgSrc: src}
+
+		_, err := NewContainersImageRepository(ctx, imgRef, sysCtx)
+		require.Error(t, err)
+	})
+
+	t.Run("VerifyNeverSucceeds", func(t *testing.T) {
+		src := newFakeImageSource()
+		imgRef := &fakeImageReference{ref: ref, imgSrc: src}
+
+		repo, err := NewContainersImageRepository(ctx, imgRef, nil, WithSignatureVerification(VerifyNever))
+		require.NoError(t, err)
+		require.NoError(t, repo.Close())
+	})
+
+	t.Run("VerifyIfPresentSucceedsWithoutPolicyFile", func(t *testing.T) {
+		src := newFakeImageSource()
+		imgRef := &fakeImageReference{ref: ref, imgSrc: src}
+
+		repo, err := NewContainersImageRepository(ctx, imgRef, nil, WithSignatureVerification(VerifyIfPresent))
+		require.NoError(t, err)
+		require.NoError(t, repo.Close())
+	})
+
+	t.Run("VerifyIfPresentFailsWithInvalidPolicyFile", func(t *testing.T) {
+		policyFile := t.TempDir() + "/policy.json"
+		require.NoError(t, os.WriteFile(policyFile, []byte("{not valid json"), 0o644))
+
+		sysCtx := &types.SystemContext{SignaturePolicyPath: policyFile}
+		src := newFakeImageSource()
+		imgRef := &fakeImageReference{ref: ref, imgSrc: src}
+
+		_, err := NewContainersImageRepository(ctx, imgRef, sysCtx, WithSignatureVerification(VerifyIfPresent))
+		require.Error(t, err)
+	})
+
+	t.Run("VerifyWithPolicySucceeds", func(t *testing.T) {
+		src := newFakeImageSource()
+		imgRef := &fakeImageReference{ref: ref, imgSrc: src}
+
+		repo, err := NewContainersImageRepository(ctx, imgRef, nil, WithSignatureVerification(VerifyWithPolicy(insecureAcceptAllPolicy(t))))
+		require.NoError(t, err)
+		require.NoError(t, repo.Close())
+	})
+}
+
+func TestContainersImageRepository_ResolveSignatureVerification(t *testing.T) {
+	ctx := context.Background()
+	ref, _ := reference.ParseNormalizedNamed("example.com/test:latest")
+
+	t.Run("AcceptAllPolicySucceeds", func(t *testing.T) {
+		src := newFakeImageSource()
+		manifestData := testutil.MustJSON(ocispecv1.Manifest{
+			Config: ocispecv1.Descriptor{Digest: digest.FromString("cfg")},
+		})
+		src.setPrimaryManifest(manifestData, ocispecv1.MediaTypeImageManifest)
+
+		policyCtx, err := VerifyWithPolicy(insecureAcceptAllPolicy(t))(nil)
+		require.NoError(t, err)
+		client := &ContainersImageRepository{ref: ref, imageSource: src, policyContext: policyCtx}
+
+		desc, err := client.Resolve(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, digest.FromBytes(manifestData), desc.Digest)
+	})
+
+	t.Run("RejectAllPolicyFails", func(t *testing.T) {
+		src := newFakeImageSource()
+		manifestData := testutil.MustJSON(ocispecv1.Manifest{
+			Config: ocispecv1.Descriptor{Digest: digest.FromString("cfg")},
+		})
+		src.setPrimaryManifest(manifestData, ocispecv1.MediaTypeImageManifest)
+
+		policyCtx, err := VerifyWithPolicy(rejectAllPolicy(t))(nil)
+		require.NoError(t, err)
+		client := &ContainersImageRepository{ref: ref, imageSource: src, policyContext: policyCtx}
+
+		_, err = client.Resolve(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "image signature verification failed")
+	})
+}
+
+func TestContainersImageRepository_FetchManifestSignatureVerification(t *testing.T) {
+	ctx := context.Background()
+	ref, _ := reference.ParseNormalizedNamed("example.com/test:latest")
+
+	t.Run("AcceptAllPolicySucceeds", func(t *testing.T) {
+		src := newFakeImageSource()
+		manifestData := testutil.MustJSON(ocispecv1.Manifest{
+			Config: ocispecv1.Descriptor{Digest: digest.FromString("cfg")},
+		})
+		dgst := digest.FromBytes(manifestData)
+		src.setManifest(dgst, manifestData, ocispecv1.MediaTypeImageManifest)
+
+		policyCtx, err := VerifyWithPolicy(insecureAcceptAllPolicy(t))(nil)
+		require.NoError(t, err)
+		client := &ContainersImageRepository{ref: ref, imageSource: src, policyContext: policyCtx}
+
+		got, mediaType, err := client.FetchManifest(ctx, ocispecv1.Descriptor{Digest: dgst})
+		require.NoError(t, err)
+		assert.Equal(t, manifestData, got)
+		assert.Equal(t, ocispecv1.MediaTypeImageManifest, mediaType)
+	})
+
+	t.Run("RejectAllPolicyFails", func(t *testing.T) {
+		src := newFakeImageSource()
+		manifestData := testutil.MustJSON(ocispecv1.Manifest{
+			Config: ocispecv1.Descriptor{Digest: digest.FromString("cfg")},
+		})
+		dgst := digest.FromBytes(manifestData)
+		src.setManifest(dgst, manifestData, ocispecv1.MediaTypeImageManifest)
+
+		policyCtx, err := VerifyWithPolicy(rejectAllPolicy(t))(nil)
+		require.NoError(t, err)
+		client := &ContainersImageRepository{ref: ref, imageSource: src, policyContext: policyCtx}
+
+		_, _, err = client.FetchManifest(ctx, ocispecv1.Descriptor{Digest: dgst})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "image signature verification failed")
+	})
+}
+
 func TestContainersImageRepository_Close(t *testing.T) {
 	t.Run("DelegatesToImageSource", func(t *testing.T) {
 		src := newFakeImageSource()
-		client := &ContainersImageRepository{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src, policyContext: skipVerificationPolicyContext(t)}
 
 		require.NoError(t, client.Close())
 		assert.True(t, src.closed)
@@ -257,7 +429,7 @@ func TestContainersImageRepository_Close(t *testing.T) {
 	t.Run("PropagatesError", func(t *testing.T) {
 		src := newFakeImageSource()
 		src.closeErr = fmt.Errorf("close failed")
-		client := &ContainersImageRepository{imageSource: src}
+		client := &ContainersImageRepository{imageSource: src, policyContext: skipVerificationPolicyContext(t)}
 
 		err := client.Close()
 		require.Error(t, err)

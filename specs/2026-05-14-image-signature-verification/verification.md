@@ -2,27 +2,27 @@
 
 ## Implementation Correctness
 
-- [ ] `Option` type, `SignatureVerificationMode` enum, and option constructors are defined and exported.
-- [ ] `NewContainersImageRepository` accepts `...Option` and processes them correctly.
-- [ ] Default mode (`VerifyAlways`) loads policy via `DefaultPolicy(sysCtx)` and fails if no policy is available.
-- [ ] `VerifySkip` mode skips all policy loading and leaves `policyContext` nil.
-- [ ] `VerifyIfPresent` mode loads policy when available, skips when no file exists, fails on parse errors.
-- [ ] `WithSignatureVerificationPolicy(policy)` uses the provided policy directly.
-- [ ] `Resolve()` calls `IsRunningImageAllowed` on the top-level `UnparsedInstance(src, nil)` before returning.
-- [ ] `Resolve()` returns an error when the policy rejects the image.
-- [ ] `Resolve()` succeeds without verification when `policyContext` is nil.
-- [ ] `FetchManifest()` calls `IsRunningImageAllowed` on `UnparsedInstance(src, &digest)` before returning.
-- [ ] `FetchManifest()` returns an error when the policy rejects the child manifest.
-- [ ] `FetchManifest()` succeeds without verification when `policyContext` is nil.
-- [ ] `Close()` calls `PolicyContext.Destroy()` when a policy context exists.
-- [ ] `Close()` succeeds when no policy context exists (nil case).
-- [ ] Error messages from `getManifest` always include both the image reference and the manifest digest.
-- [ ] Existing tests updated with `VerifySkip` continue to pass.
+- [ ] `VerificationMode` function type and built-in modes (`VerifyAlways`, `VerifyNever`, `VerifyIfPresent`, `VerifyWithPolicy`) are defined and exported.
+- [ ] `Option` type and `WithSignatureVerification` are defined and exported.
+- [ ] `NewContainersImageRepository` accepts `...Option` and defaults to `VerifyAlways`.
+- [ ] `VerifyAlways` loads policy via `DefaultPolicy(sysCtx)` and fails if no policy is available.
+- [ ] `VerifyNever` creates an accept-all policy context (never nil).
+- [ ] `VerifyIfPresent` loads policy when available, uses accept-all when no file exists, fails on parse errors or permission errors.
+- [ ] `VerifyWithPolicy(policy)` uses the provided policy directly.
+- [ ] Policy context is loaded before image source is created.
+- [ ] `getManifest` helper handles both fetching and verification in one method.
+- [ ] `Resolve()` delegates to `getManifest(ctx, nil)`.
+- [ ] `FetchManifest()` delegates to `getManifest(ctx, &desc.Digest)`.
+- [ ] `getManifest` returns an error when the policy rejects the image.
+- [ ] `getManifest` provides a fallback error message when `IsRunningImageAllowed` returns `allowed==false` with `err==nil`.
+- [ ] `Close()` calls `PolicyContext.Destroy()` unconditionally (policy context is always non-nil).
+- [ ] Error messages from `getManifest` include `ref.Name()` and the manifest digest.
+- [ ] Existing tests updated with `VerifyNever` continue to pass.
 
 ## Project Conventions
 
 - [ ] `Repository` interface is unchanged — no new methods added.
-- [ ] New public API is limited to `Option`, `SignatureVerificationMode`, and option constructors — all on the `image` package, not the interface.
+- [ ] New public API is limited to `VerificationMode`, `Option`, mode functions, and `WithSignatureVerification` — all on the `image` package, not the interface.
 - [ ] Uses `containers/image` library (`go.podman.io/image/v5`) for policy evaluation — no new dependencies added.
 - [ ] Follows "pure data types with standalone functions" principle — policy context is an implementation detail.
 - [ ] Error wrapping uses `fmt.Errorf` with `%w` for error chaining.
