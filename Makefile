@@ -1,8 +1,8 @@
-.PHONY: ci lint lint-fix test build tidy
+.PHONY: ci lint lint-fix test build tidy generate verify
 
 GO_BUILD_TAGS := containers_image_openpgp
 
-ci: lint test build
+ci: lint verify test build
 
 lint:
 	go tool golangci-lint run --build-tags "$(GO_BUILD_TAGS)" ./...
@@ -18,3 +18,9 @@ build:
 
 tidy:
 	go mod tidy
+
+generate:
+	go generate -tags "$(GO_BUILD_TAGS)" ./...
+
+verify:
+	./hack/diff.sh generate
