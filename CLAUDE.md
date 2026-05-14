@@ -29,6 +29,8 @@ resolver/            — bundle resolution from catalogs
 
 ## Build and Test
 
+All build commands use the `containers_image_openpgp` build tag (configured via `GO_BUILD_TAGS` in the Makefile) to use a pure-Go OpenPGP implementation instead of the C gpgme library.
+
 ```
 make ci        # run the full CI check (lint, test, build)
 make lint      # run golangci-lint
