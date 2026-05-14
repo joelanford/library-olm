@@ -65,11 +65,13 @@ specs/                           — project specs and work items
 
 | Command | Purpose |
 |---|---|
-| `make ci` | Run the full CI check (lint, test, build) |
+| `make ci` | Run the full CI check (lint, verify, test, build) |
 | `make lint` | Run golangci-lint |
 | `make lint-fix` | Run golangci-lint with auto-fix |
 | `make test` | Run all tests |
 | `make build` | Build all packages |
 | `make tidy` | Clean up module dependencies |
+| `make generate` | Regenerate generated files (e.g., JSON schemas) |
+| `make verify` | Check that generated files are up to date |
 
 Linting is managed via `golangci-lint`, installed as a Go tool dependency (`go tool golangci-lint`). CI runs `make ci` on PRs and pushes to `main` via GitHub Actions.

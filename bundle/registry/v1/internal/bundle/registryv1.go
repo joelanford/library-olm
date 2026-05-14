@@ -19,6 +19,8 @@ const (
 	namespaceNameMaxLength  = 63
 )
 
+//go:generate go run ./gen-config-schema registryv1bundleconfig.json
+
 var (
 	//go:embed registryv1bundleconfig.json
 	bundleConfigSchemaJSON []byte
