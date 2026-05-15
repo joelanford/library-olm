@@ -2766,6 +2766,283 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "empty affinity erases bundle affinity",
+			bundle: &bundle.RegistryV1{
+				CSV: clusterserviceversion.Builder().
+					WithStrategyDeploymentSpecs(
+						v1alpha1.StrategyDeploymentSpec{
+							Name: "test-deployment",
+							Spec: appsv1.DeploymentSpec{
+								Template: corev1.PodTemplateSpec{
+									Spec: corev1.PodSpec{
+										Containers: []corev1.Container{
+											{Name: "manager"},
+										},
+										Affinity: &corev1.Affinity{
+											NodeAffinity: &corev1.NodeAffinity{
+												RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+													NodeSelectorTerms: []corev1.NodeSelectorTerm{
+														{
+															MatchExpressions: []corev1.NodeSelectorRequirement{
+																{
+																	Key:      "disktype",
+																	Operator: corev1.NodeSelectorOpIn,
+																	Values:   []string{"ssd"},
+																},
+															},
+														},
+													},
+												},
+											},
+											PodAffinity: &corev1.PodAffinity{
+												RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+													{
+														LabelSelector: &metav1.LabelSelector{
+															MatchExpressions: []metav1.LabelSelectorRequirement{
+																{
+																	Key:      "app",
+																	Operator: metav1.LabelSelectorOpIn,
+																	Values:   []string{"cache"},
+																},
+															},
+														},
+														TopologyKey: "kubernetes.io/hostname",
+													},
+												},
+											},
+											PodAntiAffinity: &corev1.PodAntiAffinity{
+												PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+													{
+														Weight: 100,
+														PodAffinityTerm: corev1.PodAffinityTerm{
+															LabelSelector: &metav1.LabelSelector{
+																MatchExpressions: []metav1.LabelSelectorRequirement{
+																	{
+																		Key:      "app",
+																		Operator: metav1.LabelSelectorOpIn,
+																		Values:   []string{"database"},
+																	},
+																},
+															},
+															TopologyKey: "kubernetes.io/hostname",
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					).Build(),
+			},
+			opts: render.Options{
+				InstallNamespace: "test-ns",
+				TargetNamespaces: []string{"test-ns"},
+				DeploymentConfig: &config.DeploymentConfig{
+					Affinity: &corev1.Affinity{},
+				},
+			},
+			verify: func(t *testing.T, objs []client.Object) {
+				require.Len(t, objs, 1)
+				dep := objs[0].(*appsv1.Deployment)
+				require.Nil(t, dep.Spec.Template.Spec.Affinity)
+			},
+		},
+		{
+			name: "empty nodeAffinity erases only nodeAffinity",
+			bundle: &bundle.RegistryV1{
+				CSV: clusterserviceversion.Builder().
+					WithStrategyDeploymentSpecs(
+						v1alpha1.StrategyDeploymentSpec{
+							Name: "test-deployment",
+							Spec: appsv1.DeploymentSpec{
+								Template: corev1.PodTemplateSpec{
+									Spec: corev1.PodSpec{
+										Containers: []corev1.Container{
+											{Name: "manager"},
+										},
+										Affinity: &corev1.Affinity{
+											NodeAffinity: &corev1.NodeAffinity{
+												RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+													NodeSelectorTerms: []corev1.NodeSelectorTerm{
+														{
+															MatchExpressions: []corev1.NodeSelectorRequirement{
+																{
+																	Key:      "disktype",
+																	Operator: corev1.NodeSelectorOpIn,
+																	Values:   []string{"ssd"},
+																},
+															},
+														},
+													},
+												},
+											},
+											PodAffinity: &corev1.PodAffinity{
+												RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+													{
+														LabelSelector: &metav1.LabelSelector{
+															MatchExpressions: []metav1.LabelSelectorRequirement{
+																{
+																	Key:      "app",
+																	Operator: metav1.LabelSelectorOpIn,
+																	Values:   []string{"cache"},
+																},
+															},
+														},
+														TopologyKey: "kubernetes.io/hostname",
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					).Build(),
+			},
+			opts: render.Options{
+				InstallNamespace: "test-ns",
+				TargetNamespaces: []string{"test-ns"},
+				DeploymentConfig: &config.DeploymentConfig{
+					Affinity: &corev1.Affinity{
+						NodeAffinity: &corev1.NodeAffinity{},
+					},
+				},
+			},
+			verify: func(t *testing.T, objs []client.Object) {
+				require.Len(t, objs, 1)
+				dep := objs[0].(*appsv1.Deployment)
+				require.NotNil(t, dep.Spec.Template.Spec.Affinity)
+				require.Nil(t, dep.Spec.Template.Spec.Affinity.NodeAffinity)
+				require.NotNil(t, dep.Spec.Template.Spec.Affinity.PodAffinity)
+			},
+		},
+		{
+			name: "empty nodeAffinity with empty nodeSelectorTerms erases only nodeAffinity",
+			bundle: &bundle.RegistryV1{
+				CSV: clusterserviceversion.Builder().
+					WithStrategyDeploymentSpecs(
+						v1alpha1.StrategyDeploymentSpec{
+							Name: "test-deployment",
+							Spec: appsv1.DeploymentSpec{
+								Template: corev1.PodTemplateSpec{
+									Spec: corev1.PodSpec{
+										Containers: []corev1.Container{
+											{Name: "manager"},
+										},
+										Affinity: &corev1.Affinity{
+											NodeAffinity: &corev1.NodeAffinity{
+												RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+													NodeSelectorTerms: []corev1.NodeSelectorTerm{
+														{
+															MatchExpressions: []corev1.NodeSelectorRequirement{
+																{
+																	Key:      "disktype",
+																	Operator: corev1.NodeSelectorOpIn,
+																	Values:   []string{"ssd"},
+																},
+															},
+														},
+													},
+												},
+											},
+											PodAffinity: &corev1.PodAffinity{
+												RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+													{
+														LabelSelector: &metav1.LabelSelector{
+															MatchExpressions: []metav1.LabelSelectorRequirement{
+																{
+																	Key:      "app",
+																	Operator: metav1.LabelSelectorOpIn,
+																	Values:   []string{"cache"},
+																},
+															},
+														},
+														TopologyKey: "kubernetes.io/hostname",
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					).Build(),
+			},
+			opts: render.Options{
+				InstallNamespace: "test-ns",
+				TargetNamespaces: []string{"test-ns"},
+				DeploymentConfig: &config.DeploymentConfig{
+					Affinity: &corev1.Affinity{
+						NodeAffinity: &corev1.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+								NodeSelectorTerms: []corev1.NodeSelectorTerm{},
+							},
+						},
+					},
+				},
+			},
+			verify: func(t *testing.T, objs []client.Object) {
+				require.Len(t, objs, 1)
+				dep := objs[0].(*appsv1.Deployment)
+				require.NotNil(t, dep.Spec.Template.Spec.Affinity)
+				require.Nil(t, dep.Spec.Template.Spec.Affinity.NodeAffinity)
+				require.NotNil(t, dep.Spec.Template.Spec.Affinity.PodAffinity)
+			},
+		},
+		{
+			name: "all sub-affinities erased results in nil affinity",
+			bundle: &bundle.RegistryV1{
+				CSV: clusterserviceversion.Builder().
+					WithStrategyDeploymentSpecs(
+						v1alpha1.StrategyDeploymentSpec{
+							Name: "test-deployment",
+							Spec: appsv1.DeploymentSpec{
+								Template: corev1.PodTemplateSpec{
+									Spec: corev1.PodSpec{
+										Containers: []corev1.Container{
+											{Name: "manager"},
+										},
+										Affinity: &corev1.Affinity{
+											NodeAffinity: &corev1.NodeAffinity{
+												RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+													NodeSelectorTerms: []corev1.NodeSelectorTerm{
+														{
+															MatchExpressions: []corev1.NodeSelectorRequirement{
+																{
+																	Key:      "disktype",
+																	Operator: corev1.NodeSelectorOpIn,
+																	Values:   []string{"ssd"},
+																},
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					).Build(),
+			},
+			opts: render.Options{
+				InstallNamespace: "test-ns",
+				TargetNamespaces: []string{"test-ns"},
+				DeploymentConfig: &config.DeploymentConfig{
+					Affinity: &corev1.Affinity{
+						NodeAffinity: &corev1.NodeAffinity{},
+					},
+				},
+			},
+			verify: func(t *testing.T, objs []client.Object) {
+				require.Len(t, objs, 1)
+				dep := objs[0].(*appsv1.Deployment)
+				require.Nil(t, dep.Spec.Template.Spec.Affinity)
+			},
+		},
+		{
 			name: "applies annotations from deployment config",
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
