@@ -1,5 +1,5 @@
 ---
-status: pr-submitted
+status: done
 pr: https://github.com/joelanford/library-olm/pull/16
 ---
 # Image Signature Verification
