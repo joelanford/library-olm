@@ -1,0 +1,4 @@
+format: registry+v2
+name: widget-operator
+version: 1.0.0
+release: rc.1
