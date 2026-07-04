@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const contentSchemaVersion = 5
+const contentSchemaVersion = 6
 
 const contentSchemaSQL = `
 CREATE TABLE content_schema_version (
@@ -84,6 +84,11 @@ CREATE TABLE content_graph_properties (
 CREATE INDEX idx_content_graphs_parent ON content_graphs(parent_id);
 CREATE INDEX idx_content_successors_lookup ON content_successors(graph_id, from_bundle_id);
 CREATE INDEX idx_content_predecessor_ranges_lookup ON content_predecessor_ranges(graph_id);
+
+CREATE INDEX idx_content_graph_bundles_bundle ON content_graph_bundles(bundle_id);
+CREATE INDEX idx_content_successors_from ON content_successors(from_bundle_id);
+CREATE INDEX idx_content_successors_to ON content_successors(to_bundle_id);
+CREATE INDEX idx_content_predecessor_ranges_bundle ON content_predecessor_ranges(bundle_id);
 `
 
 func createContentTables(db *sql.DB) error {
