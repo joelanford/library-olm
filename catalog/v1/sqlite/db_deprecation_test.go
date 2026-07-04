@@ -231,5 +231,5 @@ func TestDeprecation_ContentSchemaVersionBump(t *testing.T) {
 	var version int
 	err = rawDB.QueryRow("SELECT version FROM content_schema_version").Scan(&version)
 	require.NoError(t, err)
-	assert.Equal(t, 5, version)
+	assert.Equal(t, 6, version)
 }
