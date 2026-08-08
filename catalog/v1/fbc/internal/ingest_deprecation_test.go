@@ -26,7 +26,7 @@ func TestParseDeprecation_InsertsEntriesWithoutExtension(t *testing.T) {
 		).
 		Build()
 
-	result, err := Ingest(context.Background(), writerDB, fsys, nil)
+	result, err := Ingest(context.Background(), writerDB, WalkFS(fsys), nil)
 	require.NoError(t, err)
 	require.Empty(t, result.PackageErrors)
 

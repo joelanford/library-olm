@@ -34,7 +34,7 @@ func TestContentFingerprint(t *testing.T) {
 
 	_, err = store.Set(context.Background(), "fp",
 		catalogv1.WithURI("test://"),
-		catalogv1.WithContent(fbc.NewImporter(fingerprintCatalogFS()), "test"),
+		catalogv1.WithContent(fbc.NewFSImporter(fingerprintCatalogFS()), "test"),
 	)
 	require.NoError(t, err)
 

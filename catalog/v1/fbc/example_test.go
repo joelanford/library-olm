@@ -15,7 +15,7 @@ import (
 	"github.com/joelanford/library-olm/catalog/v1/sqlite"
 )
 
-func ExampleNewImporter() {
+func ExampleNewFSImporter() {
 	// Build an FBC catalog in memory using NDJSON.
 	fsys := fstest.MapFS{
 		"catalog.json": &fstest.MapFile{Data: []byte(
@@ -47,7 +47,7 @@ func ExampleNewImporter() {
 	// Import FBC content into the store.
 	cat, err := store.Set(ctx, "my-catalog",
 		catalogv1.WithURI("test://example"),
-		catalogv1.WithContent(fbc.NewImporter(fsys), "example-digest"),
+		catalogv1.WithContent(fbc.NewFSImporter(fsys), "example-digest"),
 	)
 	if err != nil {
 		log.Fatal(err)

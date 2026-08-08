@@ -1,6 +1,7 @@
 package fbc_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/operator-framework/operator-registry/alpha/declcfg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -21,14 +23,33 @@ import (
 
 func importCatalog(t *testing.T, ctx context.Context, fsys fstest.MapFS) (catalogv1.Catalog, catalogv1.Store, error) {
 	t.Helper()
+	return importCatalogWith(t, ctx, fbc.NewFSImporter(fsys))
+}
+
+func importCatalogWith(t *testing.T, ctx context.Context, imp catalogv1.Importer) (catalogv1.Catalog, catalogv1.Store, error) {
+	t.Helper()
 	store, err := sqlite.OpenStore(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 
-	imp := fbc.NewImporter(fsys)
 	cat, err := store.Set(ctx, "test", catalogv1.WithURI("test://"), catalogv1.WithContent(imp, "test"))
 	require.NotNil(t, cat)
 
 	return cat, store, err
+}
+
+func fsToNDJSON(t *testing.T, fsys fstest.MapFS) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	err := declcfg.WalkMetasFS(context.Background(), fsys, func(_ string, meta *declcfg.Meta, err error) error {
+		if err != nil {
+			return err
+		}
+		buf.Write(meta.Blob)
+		buf.WriteByte('\n')
+		return nil
+	}, declcfg.WithConcurrency(1))
+	require.NoError(t, err)
+	return buf.Bytes()
 }
 
 func TestImporter_ValidCatalog(t *testing.T) {
@@ -653,7 +674,7 @@ func TestImporter_MalformedPackageBlob(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
-	imp := fbc.NewImporter(fsys)
+	imp := fbc.NewFSImporter(fsys)
 	_, err = store.Set(ctx, "test", catalogv1.WithURI("test://"), catalogv1.WithContent(imp, "test"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse package")
@@ -699,7 +720,7 @@ func TestImporter_MalformedBlobEmptyPackage(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
-	imp := fbc.NewImporter(fsys)
+	imp := fbc.NewFSImporter(fsys)
 	_, err = store.Set(ctx, "test", catalogv1.WithURI("test://"), catalogv1.WithContent(imp, "test"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse channel")
@@ -720,4 +741,55 @@ func TestImporter_PackageErrorUnwrap(t *testing.T) {
 	require.True(t, errors.As(importErr, &pkgErr))
 	assert.Equal(t, "bad-op", pkgErr.Package)
 	assert.NotEmpty(t, pkgErr.Errs)
+}
+
+func TestReaderImporter_ValidCatalog(t *testing.T) {
+	ndjson := fsToNDJSON(t, validCatalogFS())
+	ctx := context.Background()
+
+	imp := fbc.NewReaderImporter(bytes.NewReader(ndjson))
+	cat, store, err := importCatalogWith(t, ctx, imp)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, err)
+
+	var names []string
+	for pkg, err := range cat.ListPackages(ctx) {
+		require.NoError(t, err)
+		names = append(names, pkg.Name())
+	}
+	assert.Equal(t, []string{"my-operator"}, names)
+
+	pkg, err := cat.GetPackage(ctx, "my-operator")
+	require.NoError(t, err)
+	composite := pkg.(catalogv1.CompositeUpdateGraph)
+
+	bundleIDs := collectBundleIDs(t, composite.ListBundles(ctx))
+	slices.Sort(bundleIDs)
+	assert.Equal(t, []string{"my-operator.v1.0.0", "my-operator.v1.1.0", "my-operator.v1.2.0"}, bundleIDs)
+}
+
+func TestReaderImporter_MixedValidAndMalformed(t *testing.T) {
+	fsys := catalogfs.Builder().
+		WithPackage("good-op").
+		WithPackage("bad-op").
+		WithChannel("good-op", "stable", catalogfs.Entry("1.0.0")).
+		WithChannel("bad-op", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("good-op", "1.0.0").
+		WithBundle("bad-op", "not-semver", catalogfs.WithName("bad-op.v1.0.0")).
+		Build()
+	ndjson := fsToNDJSON(t, fsys)
+	ctx := context.Background()
+
+	imp := fbc.NewReaderImporter(bytes.NewReader(ndjson))
+	cat, store, importErr := importCatalogWith(t, ctx, imp)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	requirePackageError(t, importErr, "bad-op", "version")
+
+	var names []string
+	for pkg, err := range cat.ListPackages(ctx) {
+		require.NoError(t, err)
+		names = append(names, pkg.Name())
+	}
+	assert.Equal(t, []string{"good-op"}, names)
 }

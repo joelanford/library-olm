@@ -107,7 +107,7 @@ func TestOLMPackageExtension_EndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
-	imp := fbc.NewImporter(fsys, fbc.WithOLMPackageExtension(ext))
+	imp := fbc.NewFSImporter(fsys, fbc.WithOLMPackageExtension(ext))
 	cat, err := store.Set(ctx, "test",
 		catalogv1.WithURI("test://"),
 		catalogv1.WithContent(imp, "test"),
@@ -176,7 +176,7 @@ func TestOLMPackageExtension_CallbacksReceiveCorrectTypes(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
-	imp := fbc.NewImporter(fsys, fbc.WithOLMPackageExtension(ext))
+	imp := fbc.NewFSImporter(fsys, fbc.WithOLMPackageExtension(ext))
 	_, err = store.Set(ctx, "test",
 		catalogv1.WithURI("test://"),
 		catalogv1.WithContent(imp, "test"),
@@ -235,7 +235,7 @@ func TestOLMPackageExtension_ExtDataAccessible(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
-	imp := fbc.NewImporter(fsys, fbc.WithOLMPackageExtension(captureExt))
+	imp := fbc.NewFSImporter(fsys, fbc.WithOLMPackageExtension(captureExt))
 	_, err = store.Set(ctx, "test",
 		catalogv1.WithURI("test://"),
 		catalogv1.WithContent(imp, "test"),
@@ -293,7 +293,7 @@ func TestOLMPackageExtension_FinalizeAccessesDeprecationsAndOthers(t *testing.T)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
-	imp := fbc.NewImporter(fsys, fbc.WithOLMPackageExtension(captureExt))
+	imp := fbc.NewFSImporter(fsys, fbc.WithOLMPackageExtension(captureExt))
 	_, err = store.Set(ctx, "test",
 		catalogv1.WithURI("test://"),
 		catalogv1.WithContent(imp, "test"),
@@ -366,7 +366,7 @@ func TestOLMPackageExtension_ChannelEntries(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
-	imp := fbc.NewImporter(fsys, fbc.WithOLMPackageExtension(captureExt))
+	imp := fbc.NewFSImporter(fsys, fbc.WithOLMPackageExtension(captureExt))
 	_, err = store.Set(ctx, "test",
 		catalogv1.WithURI("test://"),
 		catalogv1.WithContent(imp, "test"),
@@ -411,7 +411,7 @@ func TestOLMPackageExtension_FinalizeError(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
-	imp := fbc.NewImporter(fsys, fbc.WithOLMPackageExtension(failExt))
+	imp := fbc.NewFSImporter(fsys, fbc.WithOLMPackageExtension(failExt))
 	cat, err := store.Set(ctx, "test",
 		catalogv1.WithURI("test://"),
 		catalogv1.WithContent(imp, "test"),
@@ -449,7 +449,7 @@ func TestOLMPackageExtension_NoExtension(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
-	imp := fbc.NewImporter(fsys)
+	imp := fbc.NewFSImporter(fsys)
 	cat, err := store.Set(ctx, "test",
 		catalogv1.WithURI("test://"),
 		catalogv1.WithContent(imp, "test"),
@@ -474,7 +474,7 @@ func TestProperties_DeletedOnStoreDelete(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 
-	imp := fbc.NewImporter(fsys, fbc.WithOLMPackageExtension(ext))
+	imp := fbc.NewFSImporter(fsys, fbc.WithOLMPackageExtension(ext))
 	cat, err := store.Set(ctx, "test",
 		catalogv1.WithURI("test://"),
 		catalogv1.WithContent(imp, "test"),
@@ -507,7 +507,7 @@ func TestProperties_RebuiltOnSchemaChange(t *testing.T) {
 	store, err := sqlite.OpenStore(dbPath)
 	require.NoError(t, err)
 
-	imp := fbc.NewImporter(fsys, fbc.WithOLMPackageExtension(ext))
+	imp := fbc.NewFSImporter(fsys, fbc.WithOLMPackageExtension(ext))
 	_, err = store.Set(ctx, "test",
 		catalogv1.WithURI("test://"),
 		catalogv1.WithContent(imp, "test"),
