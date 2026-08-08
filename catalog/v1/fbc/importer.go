@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"io/fs"
 
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
@@ -12,27 +13,39 @@ import (
 
 // Importer imports FBC (File-Based Catalog) content into a store via a Writer.
 type Importer struct {
-	fsys      fs.FS
+	walk      internal.WalkFunc
 	olmPkgExt OLMPackageExtension
 }
 
-// NewImporter creates a new FBC importer that reads FBC data from fsys.
-func NewImporter(fsys fs.FS, opts ...ImporterOption) *Importer {
-	imp := &Importer{fsys: fsys}
+// NewFSImporter creates a new FBC importer that reads FBC data from fsys.
+func NewFSImporter(fsys fs.FS, opts ...ImporterOption) *Importer {
+	imp := &Importer{walk: internal.WalkFS(fsys)}
 	for _, opt := range opts {
 		opt(imp)
 	}
 	return imp
 }
 
-// Import reads FBC blobs from the filesystem, ingests them into a temporary
-// staging database, normalizes per-package content, and writes the results
-// through w. Valid packages are imported even when other packages fail.
+// NewReaderImporter creates a new FBC importer that reads FBC data from r.
+// The reader should contain JSON or YAML FBC documents (e.g. NDJSON).
+// The returned Importer is single-use: subsequent calls to [Importer.Import]
+// will read from the already-consumed reader and produce empty results.
+func NewReaderImporter(r io.Reader, opts ...ImporterOption) *Importer {
+	imp := &Importer{walk: internal.WalkReader(r)}
+	for _, opt := range opts {
+		opt(imp)
+	}
+	return imp
+}
+
+// Import reads FBC blobs from the configured source, ingests them into a
+// temporary staging database, normalizes per-package content, and writes the
+// results through w. Valid packages are imported even when other packages fail.
 //
 // Per-package errors (malformed bundles, invalid skip ranges, etc.) are
 // returned as a [catalogv1.PartialImportError] that can be unwrapped into
-// individual [PackageError] values. Fatal errors (corrupt filesystem,
-// database failures) are returned directly.
+// individual [PackageError] values. Fatal errors (I/O failures, database
+// failures) are returned directly.
 func (i *Importer) Import(ctx context.Context, w catalogv1.Writer) error {
 	writerDB, readerDB, tmpDir, err := internal.OpenTempDB()
 	if err != nil {
@@ -40,7 +53,7 @@ func (i *Importer) Import(ctx context.Context, w catalogv1.Writer) error {
 	}
 	defer func() { _ = internal.CloseTempDB(writerDB, readerDB, tmpDir) }()
 
-	ingestResult, err := internal.Ingest(ctx, writerDB, i.fsys, i.olmPkgExt)
+	ingestResult, err := internal.Ingest(ctx, writerDB, i.walk, i.olmPkgExt)
 	if err != nil {
 		return fmt.Errorf("ingest: %w", err)
 	}

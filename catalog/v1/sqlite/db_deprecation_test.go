@@ -38,7 +38,7 @@ func TestDeprecation_EndToEnd(t *testing.T) {
 
 	_, err = store.Set(context.Background(), "test",
 		catalogv1.WithURI("test://"),
-		catalogv1.WithContent(fbc.NewImporter(deprecationCatalogFS()), "test"),
+		catalogv1.WithContent(fbc.NewFSImporter(deprecationCatalogFS()), "test"),
 	)
 	require.NoError(t, err)
 

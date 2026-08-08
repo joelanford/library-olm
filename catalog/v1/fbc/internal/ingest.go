@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"strings"
 	"sync"
@@ -31,7 +32,35 @@ type IngestResult struct {
 	PackageErrors map[string][]error
 }
 
-func Ingest(ctx context.Context, db *sql.DB, fsys fs.FS, ext IngestExtension) (*IngestResult, error) {
+// WalkFunc walks FBC meta blobs and calls fn for each one.
+type WalkFunc func(ctx context.Context, fn func(*declcfg.Meta) error) error
+
+// WalkFS returns a WalkFunc that walks an fs.FS using declcfg.WalkMetasFS.
+func WalkFS(fsys fs.FS) WalkFunc {
+	return func(ctx context.Context, fn func(*declcfg.Meta) error) error {
+		return declcfg.WalkMetasFS(ctx, fsys, func(_ string, meta *declcfg.Meta, err error) error {
+			if err != nil {
+				return err
+			}
+			return fn(meta)
+		})
+	}
+}
+
+// WalkReader returns a WalkFunc that reads FBC meta blobs from an io.Reader
+// using declcfg.WalkMetasReader.
+func WalkReader(r io.Reader) WalkFunc {
+	return func(_ context.Context, fn func(*declcfg.Meta) error) error {
+		return declcfg.WalkMetasReader(r, func(meta *declcfg.Meta, err error) error {
+			if err != nil {
+				return err
+			}
+			return fn(meta)
+		})
+	}
+}
+
+func Ingest(ctx context.Context, db *sql.DB, walk WalkFunc, ext IngestExtension) (*IngestResult, error) {
 	rowCh := make(chan ingestRow, 256)
 	errCh := make(chan error, 1)
 
@@ -48,11 +77,7 @@ func Ingest(ctx context.Context, db *sql.DB, fsys fs.FS, ext IngestExtension) (*
 		mu.Unlock()
 	}
 
-	walkErr := declcfg.WalkMetasFS(ctx, fsys, func(_ string, meta *declcfg.Meta, err error) error {
-		if err != nil {
-			return err
-		}
-
+	walkErr := walk(ctx, func(meta *declcfg.Meta) error {
 		var insert func(tx *sql.Tx) error
 		var parseErr error
 		switch meta.Schema {

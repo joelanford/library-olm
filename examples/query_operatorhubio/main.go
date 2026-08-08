@@ -66,7 +66,7 @@ func run() error {
 
 	cat, err := store.Set(ctx, "operatorhubio",
 		catalogv1.WithURI(catalogImage),
-		catalogv1.WithContent(fbc.NewImporter(os.DirFS(catalogDir)), catalogDigest),
+		catalogv1.WithContent(fbc.NewFSImporter(os.DirFS(catalogDir)), catalogDigest),
 	)
 	if err != nil {
 		var pkgErr *fbc.PackageError
