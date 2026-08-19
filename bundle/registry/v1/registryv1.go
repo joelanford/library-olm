@@ -54,8 +54,15 @@ func Validate(b Bundle) error {
 }
 
 // ToPlainManifests converts a parsed registry+v1 Bundle into plain Kubernetes manifests.
-func ToPlainManifests(b Bundle, installNamespace string, opts ...RenderOption) ([]client.Object, error) {
-	return registryv1.Renderer.Render(b, installNamespace, opts...)
+//
+// By default the install namespace is derived from the bundle's CSV annotations
+// (operatorframework.io/suggested-namespace-template, then
+// operatorframework.io/suggested-namespace, then "<PackageName>-system") and a
+// Namespace object for it is included as the first manifest. Pass
+// [WithSelfManagedInstallNamespace] to use a caller-managed namespace instead, in
+// which case no Namespace object is emitted.
+func ToPlainManifests(b Bundle, opts ...RenderOption) ([]client.Object, error) {
+	return registryv1.Renderer.Render(b, opts...)
 }
 
 var (
@@ -67,4 +74,10 @@ var (
 
 	// WithDeploymentConfig sets deployment customizations to apply to CSV deployments.
 	WithDeploymentConfig = render.WithDeploymentConfig
+
+	// WithSelfManagedInstallNamespace declares that the caller manages the install
+	// namespace with the given name. When set, no Namespace object is generated and
+	// the given name is used as the install namespace. When unset, the install
+	// namespace is derived from the bundle and a Namespace object is generated.
+	WithSelfManagedInstallNamespace = render.WithSelfManagedInstallNamespace
 )

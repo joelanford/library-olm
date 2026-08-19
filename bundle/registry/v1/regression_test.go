@@ -228,7 +228,7 @@ func TestRegression_RenderedOutputMatchesExpected(t *testing.T) {
 			b, err := registryv1.FromFS(bundleFS)
 			require.NoError(t, err)
 
-			var opts []registryv1.RenderOption
+			opts := []registryv1.RenderOption{registryv1.WithSelfManagedInstallNamespace(tc.installNamespace)}
 			if tc.watchNamespace != "" {
 				opts = append(opts, registryv1.WithTargetNamespaces(tc.watchNamespace))
 			}
@@ -236,7 +236,7 @@ func TestRegression_RenderedOutputMatchesExpected(t *testing.T) {
 				opts = append(opts, registryv1.WithDeploymentConfig(tc.deploymentConfig))
 			}
 
-			objs, err := registryv1.ToPlainManifests(b, tc.installNamespace, opts...)
+			objs, err := registryv1.ToPlainManifests(b, opts...)
 			require.NoError(t, err)
 
 			slices.SortFunc(objs, orderByKindNamespaceName)

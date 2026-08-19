@@ -300,7 +300,7 @@ func unpackAndRenderBundle(ctx context.Context, composite catalogv1.CompositeUpd
 	}
 	log.Printf("Parsed registry+v1 bundle: %s (CSV: %s)", bundle.ID(), regBundle.CSV.GetName())
 
-	objects, err := registryv1.ToPlainManifests(regBundle, "default")
+	objects, err := registryv1.ToPlainManifests(regBundle, registryv1.WithSelfManagedInstallNamespace("default"))
 	if err != nil {
 		return fmt.Errorf("render plain manifests: %w", err)
 	}

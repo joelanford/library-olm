@@ -58,6 +58,10 @@ func (r ResourceGenerators) ResourceGenerator() ResourceGenerator {
 type UniqueNameGenerator func(string, interface{}) string
 
 type Options struct {
+	// InstallNamespace is the resolved install namespace. It is populated by the
+	// renderer during Render (from WithSelfManagedInstallNamespace or derived from
+	// the bundle) and read by generators. Setting it via a custom Option has no
+	// effect: the renderer overwrites it after options are applied.
 	InstallNamespace    string
 	TargetNamespaces    []string
 	UniqueNameGenerator UniqueNameGenerator
@@ -65,6 +69,12 @@ type Options struct {
 	// DeploymentConfig contains optional customizations to apply to CSV deployments.
 	// If nil, no customizations are applied.
 	DeploymentConfig *config.DeploymentConfig
+
+	// SelfManagedInstallNamespace, when non-nil, declares that the caller manages
+	// the install namespace of the given name. In that case no Namespace object is
+	// generated. When nil, the install namespace is derived from the bundle and a
+	// Namespace object is generated.
+	SelfManagedInstallNamespace *string
 }
 
 func (o *Options) apply(opts ...Option) *Options {
@@ -100,6 +110,17 @@ func WithTargetNamespaces(namespaces ...string) Option {
 	}
 }
 
+// WithSelfManagedInstallNamespace declares that the caller manages the install
+// namespace with the given name. When set, the renderer uses name as the install
+// namespace and does not generate a Namespace object. When unset, the renderer
+// derives the install namespace from the bundle's CSV annotations and generates
+// a Namespace object.
+func WithSelfManagedInstallNamespace(name string) Option {
+	return func(o *Options) {
+		o.SelfManagedInstallNamespace = &name
+	}
+}
+
 func WithUniqueNameGenerator(generator UniqueNameGenerator) Option {
 	return func(o *Options) {
 		o.UniqueNameGenerator = generator
@@ -125,29 +146,45 @@ type BundleRenderer struct {
 	ResourceGenerators []ResourceGenerator
 }
 
-func (r BundleRenderer) Render(rv1 bundle.RegistryV1, installNamespace string, opts ...Option) ([]client.Object, error) {
+func (r BundleRenderer) Render(rv1 bundle.RegistryV1, opts ...Option) ([]client.Object, error) {
 	// validate bundle
 	if err := r.BundleValidator.Validate(&rv1); err != nil {
 		return nil, err
 	}
 
 	// generate bundle objects
-	genOpts, errs := (&Options{
+	genOpts := (&Options{
 		// default options
-		InstallNamespace:    installNamespace,
 		TargetNamespaces:    defaultTargetNamespacesForBundle(&rv1),
 		UniqueNameGenerator: DefaultUniqueNameGenerator,
 		CertificateProvider: nil,
-	}).apply(opts...).validate(&rv1)
+	}).apply(opts...)
 
-	if len(errs) > 0 {
-		return nil, fmt.Errorf("invalid option(s): %w", errors.Join(errs...))
-	}
-
-	objs, err := ResourceGenerators(r.ResourceGenerators).GenerateResources(&rv1, *genOpts)
+	// Resolve the install namespace before generators run so that
+	// Options.InstallNamespace is populated for every generator. When the caller
+	// does not self-manage the namespace, the resolved Namespace object is emitted
+	// first so it sorts before namespaced resources.
+	ns, emit, err := resolveInstallNamespace(&rv1, genOpts.SelfManagedInstallNamespace)
 	if err != nil {
 		return nil, err
 	}
+	genOpts.InstallNamespace = ns.Name
+
+	// validate options
+	if _, errs := genOpts.validate(&rv1); len(errs) > 0 {
+		return nil, fmt.Errorf("invalid option(s): %w", errors.Join(errs...))
+	}
+
+	var objs []client.Object
+	if emit {
+		objs = append(objs, &ns)
+	}
+
+	generated, err := ResourceGenerators(r.ResourceGenerators).GenerateResources(&rv1, *genOpts)
+	if err != nil {
+		return nil, err
+	}
+	objs = append(objs, generated...)
 
 	return objs, nil
 }
