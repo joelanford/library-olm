@@ -83,7 +83,7 @@ func Test_Renderer_Success(t *testing.T) {
 		},
 	}
 
-	objs, err := registryv1.Renderer.Render(someBundle, "install-namespace")
+	objs, err := registryv1.Renderer.Render(someBundle, render.WithSelfManagedInstallNamespace("install-namespace"))
 	t.Log("Check renderer returns objects and no errors")
 	require.NoError(t, err)
 	require.NotEmpty(t, objs)
@@ -116,7 +116,7 @@ func Test_Renderer_Failure_UnsupportedKind(t *testing.T) {
 		},
 	}
 
-	objs, err := registryv1.Renderer.Render(someBundle, "install-namespace")
+	objs, err := registryv1.Renderer.Render(someBundle, render.WithSelfManagedInstallNamespace("install-namespace"))
 	t.Log("Check renderer returns objects and no errors")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported resource")

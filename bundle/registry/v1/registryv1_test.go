@@ -149,7 +149,7 @@ func TestToPlainManifests(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 		require.NotEmpty(t, objs)
 
@@ -185,7 +185,7 @@ func TestToPlainManifests(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace", registryv1.WithTargetNamespaces("my-namespace"))
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"), registryv1.WithTargetNamespaces("my-namespace"))
 		require.NoError(t, err)
 		require.NotEmpty(t, objs)
 
@@ -219,7 +219,7 @@ func TestToPlainManifests(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "install-ns", registryv1.WithTargetNamespaces("watch-ns"))
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("install-ns"), registryv1.WithTargetNamespaces("watch-ns"))
 		require.NoError(t, err)
 		require.NotEmpty(t, objs)
 		assertHasObjectOfKind(t, objs, "Role")
@@ -242,7 +242,7 @@ func TestToPlainManifests(t *testing.T) {
 			},
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "CustomResourceDefinition")
 	})
@@ -263,7 +263,7 @@ func TestToPlainManifests(t *testing.T) {
 			},
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 		assertHasObjectOfKindAndName(t, objs, "ConfigMap", "my-cm")
 	})
@@ -284,7 +284,7 @@ func TestToPlainManifests(t *testing.T) {
 			},
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "target-ns")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("target-ns"))
 		require.NoError(t, err)
 		cm := findObjectByKindAndName(objs, "ConfigMap", "my-cm")
 		require.NotNil(t, cm)
@@ -310,7 +310,7 @@ func TestToPlainManifests(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 
 		dep := findObjectByKind(objs, "Deployment")
@@ -333,7 +333,7 @@ func TestToPlainManifests(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 
 		// In AllNamespaces mode, permissions are promoted to ClusterRole/ClusterRoleBinding
@@ -358,7 +358,7 @@ func TestToPlainManifests(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "ClusterRole")
 		assertHasObjectOfKind(t, objs, "ClusterRoleBinding")
@@ -394,7 +394,7 @@ func TestToPlainManifests_Webhooks(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "ValidatingWebhookConfiguration")
 		assertHasObjectOfKind(t, objs, "Service")
@@ -428,7 +428,7 @@ func TestToPlainManifests_Webhooks(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "MutatingWebhookConfiguration")
 		assertHasObjectOfKind(t, objs, "Service")
@@ -471,7 +471,7 @@ func TestToPlainManifests_Webhooks(t *testing.T) {
 			},
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 
 		crd := findObjectByKind(objs, "CustomResourceDefinition")
@@ -507,7 +507,7 @@ func TestToPlainManifests_Webhooks(t *testing.T) {
 		}
 
 		provider := &certproviders.OpenshiftServiceCaCertificateProvider{}
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace", registryv1.WithCertificateProvider(provider))
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"), registryv1.WithCertificateProvider(provider))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "ValidatingWebhookConfiguration")
 		assertHasObjectOfKind(t, objs, "Service")
@@ -546,7 +546,7 @@ func TestToPlainManifests_Webhooks(t *testing.T) {
 		}
 
 		provider := &certproviders.CertManagerCertificateProvider{}
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace", registryv1.WithCertificateProvider(provider))
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"), registryv1.WithCertificateProvider(provider))
 		require.NoError(t, err)
 
 		// cert-manager generates additional Issuer and Certificate objects
@@ -586,7 +586,7 @@ func TestToPlainManifests_WithDeploymentConfig(t *testing.T) {
 				{Name: "MY_ENV", Value: "my-value"},
 			},
 		}
-		objs, err := registryv1.ToPlainManifests(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), registryv1.WithSelfManagedInstallNamespace("my-namespace"), registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		require.NotEmpty(t, objs)
 		assertHasObjectOfKind(t, objs, "Deployment")
@@ -598,7 +598,7 @@ func TestToPlainManifests_WithDeploymentConfig(t *testing.T) {
 				{Key: "key1", Operator: corev1.TolerationOpEqual, Value: "value1", Effect: corev1.TaintEffectNoSchedule},
 			},
 		}
-		objs, err := registryv1.ToPlainManifests(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), registryv1.WithSelfManagedInstallNamespace("my-namespace"), registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -607,7 +607,7 @@ func TestToPlainManifests_WithDeploymentConfig(t *testing.T) {
 		dc := &registryv1.DeploymentConfig{
 			NodeSelector: map[string]string{"disk": "ssd"},
 		}
-		objs, err := registryv1.ToPlainManifests(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), registryv1.WithSelfManagedInstallNamespace("my-namespace"), registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -620,13 +620,13 @@ func TestToPlainManifests_WithDeploymentConfig(t *testing.T) {
 				},
 			},
 		}
-		objs, err := registryv1.ToPlainManifests(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), registryv1.WithSelfManagedInstallNamespace("my-namespace"), registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
 
 	t.Run("nil deployment config is a no-op", func(t *testing.T) {
-		objs, err := registryv1.ToPlainManifests(baseBundle(), "my-namespace", registryv1.WithDeploymentConfig(nil))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), registryv1.WithSelfManagedInstallNamespace("my-namespace"), registryv1.WithDeploymentConfig(nil))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -640,7 +640,7 @@ func TestToPlainManifests_Validation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "my-namespace")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "package name is empty")
 	})
@@ -657,7 +657,7 @@ func TestToPlainManifests_Validation(t *testing.T) {
 				).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "my-namespace")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "duplicate strategy deployment spec")
 	})
@@ -671,7 +671,7 @@ func TestToPlainManifests_Validation(t *testing.T) {
 				WithOwnedCRDs(v1alpha1.CRDDescription{Name: "foos.example.com"}).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "my-namespace")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "foos.example.com")
 	})
@@ -684,7 +684,7 @@ func TestToPlainManifests_Validation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeSingleNamespace).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "my-namespace", registryv1.WithTargetNamespaces(""))
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"), registryv1.WithTargetNamespaces(""))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "do not support targeting all namespaces")
 	})
@@ -707,7 +707,7 @@ func TestToPlainManifests_Validation(t *testing.T) {
 				{ObjectMeta: metav1.ObjectMeta{Name: "foos.example.com"}},
 			},
 		}
-		_, err := registryv1.ToPlainManifests(b, "my-namespace", registryv1.WithTargetNamespaces("my-namespace"))
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"), registryv1.WithTargetNamespaces("my-namespace"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "conversion webhook")
 	})
@@ -728,7 +728,7 @@ func TestToPlainManifests_Validation(t *testing.T) {
 				}).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "my-namespace")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "non-existent deployment")
 	})
@@ -748,7 +748,7 @@ func TestToPlainManifests_Validation(t *testing.T) {
 				}},
 			},
 		}
-		_, err := registryv1.ToPlainManifests(b, "my-namespace")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "UnsupportedKind")
 	})
@@ -783,7 +783,7 @@ func TestToPlainManifests_DeploymentConfigDetails(t *testing.T) {
 				}},
 			},
 		}
-		objs, err := registryv1.ToPlainManifests(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), registryv1.WithSelfManagedInstallNamespace("ns"), registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -797,7 +797,7 @@ func TestToPlainManifests_DeploymentConfigDetails(t *testing.T) {
 				{Name: "data", MountPath: "/data"},
 			},
 		}
-		objs, err := registryv1.ToPlainManifests(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), registryv1.WithSelfManagedInstallNamespace("ns"), registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -818,7 +818,7 @@ func TestToPlainManifests_DeploymentConfigDetails(t *testing.T) {
 				PodAntiAffinity: &corev1.PodAntiAffinity{},
 			},
 		}
-		objs, err := registryv1.ToPlainManifests(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), registryv1.WithSelfManagedInstallNamespace("ns"), registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -827,7 +827,7 @@ func TestToPlainManifests_DeploymentConfigDetails(t *testing.T) {
 		dc := &registryv1.DeploymentConfig{
 			Annotations: map[string]string{"custom-key": "custom-value"},
 		}
-		objs, err := registryv1.ToPlainManifests(baseBundle(), "ns", registryv1.WithDeploymentConfig(dc))
+		objs, err := registryv1.ToPlainManifests(baseBundle(), registryv1.WithSelfManagedInstallNamespace("ns"), registryv1.WithDeploymentConfig(dc))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Deployment")
 	})
@@ -863,7 +863,7 @@ func TestToPlainManifests_WebhookWithTargetNamespaces(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "install-ns", registryv1.WithTargetNamespaces("watch-ns"))
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("install-ns"), registryv1.WithTargetNamespaces("watch-ns"))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "ValidatingWebhookConfiguration")
 	})
@@ -895,7 +895,7 @@ func TestToPlainManifests_WebhookWithTargetNamespaces(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "install-ns", registryv1.WithTargetNamespaces("watch-ns"))
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("install-ns"), registryv1.WithTargetNamespaces("watch-ns"))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "MutatingWebhookConfiguration")
 	})
@@ -927,7 +927,7 @@ func TestToPlainManifests_MultiNamespace(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "install-ns", registryv1.WithTargetNamespaces("ns1", "ns2"))
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("install-ns"), registryv1.WithTargetNamespaces("ns1", "ns2"))
 		require.NoError(t, err)
 		// Should generate Role+RoleBinding per target namespace
 		roles := findAllObjectsOfKind(objs, "Role")
@@ -953,7 +953,7 @@ func TestToPlainManifests_ServiceAccountHandling(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 		assertNoObjectOfKind(t, objs, "ServiceAccount")
 	})
@@ -973,7 +973,7 @@ func TestToPlainManifests_ServiceAccountHandling(t *testing.T) {
 				Build(),
 		}
 
-		objs, err := registryv1.ToPlainManifests(b, "my-namespace")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("my-namespace"))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "ServiceAccount")
 	})
@@ -1006,7 +1006,7 @@ func TestToPlainManifests_AdditionalValidation(t *testing.T) {
 				).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "duplicate webhook")
 	})
@@ -1023,7 +1023,7 @@ func TestToPlainManifests_AdditionalValidation(t *testing.T) {
 				{ObjectMeta: metav1.ObjectMeta{Name: "foos.example.com"}},
 			},
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "duplicate custom resource definition")
 	})
@@ -1048,7 +1048,7 @@ func TestToPlainManifests_AdditionalValidation(t *testing.T) {
 				}).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "forbidden rule")
 	})
@@ -1078,7 +1078,7 @@ func TestToPlainManifests_AdditionalValidation(t *testing.T) {
 				{ObjectMeta: metav1.ObjectMeta{Name: "foos.example.com"}},
 			},
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"))
 		require.Error(t, err)
 	})
 
@@ -1096,7 +1096,7 @@ func TestToPlainManifests_AdditionalValidation(t *testing.T) {
 				}).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "not owned")
 	})
@@ -1132,7 +1132,7 @@ func TestToPlainManifests_WebhookWithCustomContainerPort(t *testing.T) {
 			Build(),
 	}
 
-	objs, err := registryv1.ToPlainManifests(b, "ns")
+	objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"))
 	require.NoError(t, err)
 	assertHasObjectOfKind(t, objs, "Service")
 	assertHasObjectOfKind(t, objs, "ValidatingWebhookConfiguration")
@@ -1175,7 +1175,7 @@ func TestToPlainManifests_ConversionWebhookWithCertProvider(t *testing.T) {
 		}
 
 		provider := &certproviders.CertManagerCertificateProvider{}
-		objs, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithCertificateProvider(provider))
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"), registryv1.WithCertificateProvider(provider))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "Issuer")
 		assertHasObjectOfKind(t, objs, "Certificate")
@@ -1221,7 +1221,7 @@ func TestToPlainManifests_ConversionWebhookWithCertProvider(t *testing.T) {
 		}
 
 		provider := &certproviders.OpenshiftServiceCaCertificateProvider{}
-		objs, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithCertificateProvider(provider))
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"), registryv1.WithCertificateProvider(provider))
 		require.NoError(t, err)
 		assertHasObjectOfKind(t, objs, "CustomResourceDefinition")
 
@@ -1294,7 +1294,7 @@ func TestToPlainManifests_MoreValidation(t *testing.T) {
 				}).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid name")
 	})
@@ -1308,7 +1308,7 @@ func TestToPlainManifests_MoreValidation(t *testing.T) {
 				WithStrategyDeploymentSpecs(v1alpha1.StrategyDeploymentSpec{Name: "INVALID_DEP!!"}).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid")
 	})
@@ -1336,7 +1336,7 @@ func TestToPlainManifests_MoreValidation(t *testing.T) {
 				}).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns")
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "forbidden rule")
 	})
@@ -1349,7 +1349,7 @@ func TestToPlainManifests_MoreValidation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithTargetNamespaces("ns"))
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"), registryv1.WithTargetNamespaces("ns"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "do not support targeting own namespace")
 	})
@@ -1362,7 +1362,7 @@ func TestToPlainManifests_MoreValidation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithTargetNamespaces("a", "b"))
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"), registryv1.WithTargetNamespaces("a", "b"))
 		require.Error(t, err)
 	})
 
@@ -1374,7 +1374,7 @@ func TestToPlainManifests_MoreValidation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeMultiNamespace).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithTargetNamespaces("ns", "other"))
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"), registryv1.WithTargetNamespaces("ns", "other"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "do not support targeting own namespace")
 	})
@@ -1387,7 +1387,7 @@ func TestToPlainManifests_MoreValidation(t *testing.T) {
 				WithInstallModeSupportFor(v1alpha1.InstallModeTypeOwnNamespace).
 				Build(),
 		}
-		_, err := registryv1.ToPlainManifests(b, "ns", registryv1.WithTargetNamespaces("different-ns"))
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("ns"), registryv1.WithTargetNamespaces("different-ns"))
 		require.Error(t, err)
 	})
 }
@@ -1427,7 +1427,7 @@ func TestFromFSThenToPlainManifests(t *testing.T) {
 		b, err := registryv1.FromFS(fs)
 		require.NoError(t, err)
 
-		objs, err := registryv1.ToPlainManifests(b, "operator-ns")
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("operator-ns"))
 		require.NoError(t, err)
 		require.NotEmpty(t, objs)
 
@@ -1435,6 +1435,123 @@ func TestFromFSThenToPlainManifests(t *testing.T) {
 		assertHasObjectOfKind(t, objs, "ClusterRole")
 		assertHasObjectOfKind(t, objs, "ClusterRoleBinding")
 		assertHasObjectOfKind(t, objs, "Deployment")
+	})
+}
+
+func TestToPlainManifests_ManagedNamespace(t *testing.T) {
+	// newBundle builds a minimal AllNamespaces bundle with the given package name
+	// and CSV annotations.
+	newBundle := func(packageName string, annotations map[string]string) registryv1.Bundle {
+		csvBuilder := clusterserviceversion.Builder().
+			WithName(packageName + ".v1.0.0").
+			WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).
+			WithStrategyDeploymentSpecs(v1alpha1.StrategyDeploymentSpec{
+				Name: packageName + "-controller",
+				Spec: appsv1.DeploymentSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{{Name: "manager", Image: "img:latest"}},
+						},
+					},
+				},
+			})
+		if annotations != nil {
+			csvBuilder = csvBuilder.WithAnnotations(annotations)
+		}
+		return registryv1.Bundle{
+			PackageName: packageName,
+			CSV:         csvBuilder.Build(),
+		}
+	}
+
+	t.Run("self-managed namespace emits no Namespace object", func(t *testing.T) {
+		b := newBundle("my-operator", nil)
+
+		objs, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("caller-ns"))
+		require.NoError(t, err)
+		assertNoObjectOfKind(t, objs, "Namespace")
+
+		// the caller-managed namespace is used for namespaced resources
+		dep := findObjectByKind(objs, "Deployment")
+		require.NotNil(t, dep)
+		assert.Equal(t, "caller-ns", dep.GetNamespace())
+	})
+
+	t.Run("fallback to <PackageName>-system when no annotations", func(t *testing.T) {
+		b := newBundle("my-operator", nil)
+
+		objs, err := registryv1.ToPlainManifests(b)
+		require.NoError(t, err)
+
+		ns := findObjectByKind(objs, "Namespace")
+		require.NotNil(t, ns)
+		assert.Equal(t, "my-operator-system", ns.GetName())
+		assert.Equal(t, "my-operator-system", findObjectByKind(objs, "Deployment").GetNamespace())
+	})
+
+	t.Run("Namespace object sorts before namespaced resources", func(t *testing.T) {
+		b := newBundle("my-operator", nil)
+
+		objs, err := registryv1.ToPlainManifests(b)
+		require.NoError(t, err)
+		require.NotEmpty(t, objs)
+		assert.Equal(t, "Namespace", objs[0].GetObjectKind().GroupVersionKind().Kind)
+	})
+
+	t.Run("suggested-namespace annotation supplies the name", func(t *testing.T) {
+		b := newBundle("my-operator", map[string]string{
+			"operatorframework.io/suggested-namespace": "suggested-ns",
+		})
+
+		objs, err := registryv1.ToPlainManifests(b)
+		require.NoError(t, err)
+
+		ns := findObjectByKind(objs, "Namespace")
+		require.NotNil(t, ns)
+		assert.Equal(t, "suggested-ns", ns.GetName())
+		assert.Empty(t, ns.GetLabels())
+	})
+
+	t.Run("suggested-namespace-template supplies name and metadata", func(t *testing.T) {
+		b := newBundle("my-operator", map[string]string{
+			"operatorframework.io/suggested-namespace-template": `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"tmpl-ns","labels":{"pod-security.kubernetes.io/enforce":"restricted"}}}`,
+			// present but must be ignored when the template is set
+			"operatorframework.io/suggested-namespace": "ignored-ns",
+		})
+
+		objs, err := registryv1.ToPlainManifests(b)
+		require.NoError(t, err)
+
+		ns := findObjectByKind(objs, "Namespace")
+		require.NotNil(t, ns)
+		assert.Equal(t, "tmpl-ns", ns.GetName())
+		assert.Equal(t, "restricted", ns.GetLabels()["pod-security.kubernetes.io/enforce"])
+	})
+
+	t.Run("empty template name is a validation error", func(t *testing.T) {
+		b := newBundle("my-operator", map[string]string{
+			"operatorframework.io/suggested-namespace-template": `{"apiVersion":"v1","kind":"Namespace","metadata":{"labels":{"a":"b"}}}`,
+			"operatorframework.io/suggested-namespace":          "fallback-ns",
+		})
+
+		_, err := registryv1.ToPlainManifests(b)
+		require.Error(t, err)
+	})
+
+	t.Run("malformed template is a render error", func(t *testing.T) {
+		b := newBundle("my-operator", map[string]string{
+			"operatorframework.io/suggested-namespace-template": `{not valid`,
+		})
+
+		_, err := registryv1.ToPlainManifests(b)
+		require.Error(t, err)
+	})
+
+	t.Run("invalid self-managed name is a render error", func(t *testing.T) {
+		b := newBundle("my-operator", nil)
+
+		_, err := registryv1.ToPlainManifests(b, registryv1.WithSelfManagedInstallNamespace("Invalid_NS"))
+		require.Error(t, err)
 	})
 }
 

@@ -67,7 +67,7 @@ func ExampleToPlainManifests() {
 		log.Fatal(err)
 	}
 
-	objs, err := registryv1.ToPlainManifests(bundle, "operators")
+	objs, err := registryv1.ToPlainManifests(bundle, registryv1.WithSelfManagedInstallNamespace("operators"))
 	if err != nil {
 		log.Fatal(err)
 	}
