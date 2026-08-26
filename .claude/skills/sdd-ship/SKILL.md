@@ -1,3 +1,7 @@
+---
+name: sdd-ship
+description: Finalize and publish the current branch's changes.
+---
 Finalize and publish the current branch's changes.
 
 ## Phase 1: Verify

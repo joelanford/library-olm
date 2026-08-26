@@ -1,3 +1,7 @@
+---
+name: sdd-plan-next-phase
+description: Plan the next work item for the project.
+---
 Plan the next work item for the project.
 
 ## Step 1: Check for clean state
