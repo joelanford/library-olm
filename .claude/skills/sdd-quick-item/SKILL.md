@@ -1,3 +1,7 @@
+---
+name: sdd-quick-item
+description: Quickly capture a work item idea to the backlog.
+---
 Quickly capture a work item idea to the backlog.
 
 ## Step 1: Get the idea

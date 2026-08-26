@@ -1,3 +1,7 @@
+---
+name: sdd-ideate
+description: Brainstorm and add new work items to the backlog.
+---
 Brainstorm and add new work items to the backlog.
 
 ## Step 1: Gather context
