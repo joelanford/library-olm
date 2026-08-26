@@ -1,0 +1,1 @@
+{{ include "base-chart.label" . }}: {{ .Values.parent.defaultOnly }}

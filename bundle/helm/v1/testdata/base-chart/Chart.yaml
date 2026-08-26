@@ -1,0 +1,13 @@
+apiVersion: v2
+name: base-chart
+version: 1.0.0
+appVersion: 2.0.0
+dependencies:
+- name: child
+  version: 1.0.0
+  condition: child.enabled
+- name: optional
+  version: 1.0.0
+  condition: optional.enabled
+- name: library
+  version: 1.0.0
