@@ -1,0 +1,14 @@
+parent:
+  defaultOnly: parent-default
+  overridden: parent-default
+  requiredValue: required-default
+  replicas: 2
+  servicePort: 8080
+child:
+  enabled: true
+  parentOverride: parent-override
+  userOverride: parent-default
+optional:
+  enabled: true
+global:
+  shared: global-default
