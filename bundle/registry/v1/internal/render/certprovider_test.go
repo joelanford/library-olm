@@ -100,9 +100,9 @@ func Test_CertificateProvisioner_Errors(t *testing.T) {
 	require.Nil(t, objs)
 }
 
-func Test_CertProvisionerFor(t *testing.T) {
+func Test_CertProvisionerForService(t *testing.T) {
 	fakeProvider := &FakeCertProvider{}
-	prov := render.CertProvisionerFor(types.NamespacedName{Name: "my.deployment.thing", Namespace: "my-namespace"}, render.Options{
+	prov := render.CertProvisionerForService(types.NamespacedName{Name: "my-deployment-thing-service", Namespace: "my-namespace"}, render.Options{
 		CertificateProvider: fakeProvider,
 	})
 
@@ -112,11 +112,12 @@ func Test_CertProvisionerFor(t *testing.T) {
 	require.Equal(t, "my-namespace", prov.Namespace)
 }
 
-func Test_CertProvisionerFor_ExtraLargeName_MoreThan63Chars(t *testing.T) {
-	prov := render.CertProvisionerFor(types.NamespacedName{Name: "my.object.thing.has.a.really.really.really.really.really.long.name"}, render.Options{})
+func Test_CertProvisionerForService_ExtraLargeName_MoreThan63Chars(t *testing.T) {
+	serviceName := "my-object-thing-has-a-really-really-really-really-reall-service"
+	prov := render.CertProvisionerForService(types.NamespacedName{Name: serviceName}, render.Options{})
 
 	require.Len(t, prov.ServiceName, 63)
 	require.Len(t, prov.CertName, 63)
-	require.Equal(t, "my-object-thing-has-a-really-really-really-really-reall-service", prov.ServiceName)
+	require.Equal(t, serviceName, prov.ServiceName)
 	require.Equal(t, "my-object-thing-has-a-really-really-really-really-reall-se-cert", prov.CertName)
 }

@@ -171,7 +171,7 @@ func Test_BundleCSVDeploymentGenerator_Succeeds(t *testing.T) {
 	}
 }
 
-func Test_BundleCSVDeploymentGenerator_WithCertWithCertProvider_Succeeds(t *testing.T) {
+func Test_CertProviderResourceGenerator_InjectsDeploymentCertVolumes(t *testing.T) {
 	fakeProvider := FakeCertProvider{
 		GetCertSecretInfoFn: func(cfg render.CertificateProvisionerConfig) render.CertSecretInfo {
 			return render.CertSecretInfo{
@@ -179,6 +179,9 @@ func Test_BundleCSVDeploymentGenerator_WithCertWithCertProvider_Succeeds(t *test
 				CertificateKey: "some-cert-key",
 				PrivateKeyKey:  "some-private-key-key",
 			}
+		},
+		AdditionalObjectsFn: func(cfg render.CertificateProvisionerConfig) ([]unstructured.Unstructured, error) {
+			return nil, nil
 		},
 	}
 
@@ -265,9 +268,12 @@ func Test_BundleCSVDeploymentGenerator_WithCertWithCertProvider_Succeeds(t *test
 	}
 
 	ctx := &render.GeneratorContext{InstallNamespace: "install-namespace"}
-	err := generators.BundleCSVDeploymentGenerator(*b, render.Options{
+	opts := render.Options{
 		CertificateProvider: fakeProvider,
-	}, ctx)
+	}
+	err := generators.BundleCSVDeploymentGenerator(*b, opts, ctx)
+	require.NoError(t, err)
+	err = generators.CertProviderResourceGenerator(*b, opts, ctx)
 	require.NoError(t, err)
 	require.Len(t, ctx.Objects, 1)
 
@@ -1372,47 +1378,6 @@ func Test_BundleCRDGenerator_WithConversionWebhook_Fails(t *testing.T) {
 	require.Contains(t, err.Error(), "must have .spec.preserveUnknownFields set to false to let API Server call webhook to do the conversion")
 }
 
-func Test_BundleCRDGenerator_WithCertProvider_Succeeds(t *testing.T) {
-	fakeProvider := FakeCertProvider{
-		InjectCABundleFn: func(obj client.Object, cfg render.CertificateProvisionerConfig) error {
-			obj.SetAnnotations(map[string]string{
-				"cert-provider": "annotation",
-			})
-			return nil
-		},
-	}
-
-	opts := render.Options{
-		TargetNamespaces:    []string{""},
-		CertificateProvider: fakeProvider,
-	}
-
-	bundle := &bundle.RegistryV1{
-		CRDs: []apiextensionsv1.CustomResourceDefinition{
-			{ObjectMeta: metav1.ObjectMeta{Name: "crd-one"}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "crd-two"}},
-		},
-		CSV: clusterserviceversion.Builder().
-			WithWebhookDefinitions(
-				v1alpha1.WebhookDescription{
-					Type:           v1alpha1.ConversionWebhook,
-					DeploymentName: "my-deployment",
-					ConversionCRDs: []string{
-						"crd-one",
-					},
-				},
-			).Build(),
-	}
-
-	ctx := &render.GeneratorContext{InstallNamespace: "install-namespace"}
-	err := generators.BundleCRDGenerator(*bundle, opts, ctx)
-	require.NoError(t, err)
-	require.Len(t, ctx.Objects, 2)
-	require.Equal(t, map[string]string{
-		"cert-provider": "annotation",
-	}, ctx.Objects[0].GetAnnotations())
-}
-
 func Test_BundleAdditionalResourcesGenerator_Succeeds(t *testing.T) {
 	opts := render.Options{}
 
@@ -1450,14 +1415,6 @@ func Test_BundleAdditionalResourcesGenerator_Succeeds(t *testing.T) {
 }
 
 func Test_BundleValidatingWebhookResourceGenerator_Succeeds(t *testing.T) {
-	fakeProvider := FakeCertProvider{
-		InjectCABundleFn: func(obj client.Object, cfg render.CertificateProvisionerConfig) error {
-			obj.SetAnnotations(map[string]string{
-				"cert-provider": "annotation",
-			})
-			return nil
-		},
-	}
 	for _, tc := range []struct {
 		name              string
 		bundle            *bundle.RegistryV1
@@ -1642,61 +1599,6 @@ func Test_BundleValidatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 									Namespace: "install-namespace",
 									Name:      "my-deployment-service",
 									Path:      ptr.To("/webhook-path"),
-									Port:      ptr.To(int32(443)),
-								},
-							},
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchExpressions: []metav1.LabelSelectorRequirement{
-									{
-										Key:      "kubernetes.io/metadata.name",
-										Operator: metav1.LabelSelectorOpIn,
-										Values:   []string{"watch-namespace-one", "watch-namespace-two"},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "generates validating webhook configuration resources with certificate provider modifications",
-			bundle: &bundle.RegistryV1{
-				CSV: clusterserviceversion.Builder().
-					WithWebhookDefinitions(
-						v1alpha1.WebhookDescription{
-							Type:           v1alpha1.ValidatingAdmissionWebhook,
-							GenerateName:   "my-webhook",
-							DeploymentName: "my-deployment",
-							ContainerPort:  443,
-						},
-					).Build(),
-			},
-			opts: render.Options{
-				TargetNamespaces:    []string{"watch-namespace-one", "watch-namespace-two"},
-				CertificateProvider: fakeProvider,
-			},
-			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
-			expectedResources: []client.Object{
-				&admissionregistrationv1.ValidatingWebhookConfiguration{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       "ValidatingWebhookConfiguration",
-						APIVersion: admissionregistrationv1.SchemeGroupVersion.String(),
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "my-webhook",
-						Namespace: "install-namespace",
-						Annotations: map[string]string{
-							"cert-provider": "annotation",
-						},
-					},
-					Webhooks: []admissionregistrationv1.ValidatingWebhook{
-						{
-							Name: "my-webhook",
-							ClientConfig: admissionregistrationv1.WebhookClientConfig{
-								Service: &admissionregistrationv1.ServiceReference{
-									Namespace: "install-namespace",
-									Name:      "my-deployment-service",
 									Port:      ptr.To(int32(443)),
 								},
 							},
@@ -1724,14 +1626,6 @@ func Test_BundleValidatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 }
 
 func Test_BundleMutatingWebhookResourceGenerator_Succeeds(t *testing.T) {
-	fakeProvider := FakeCertProvider{
-		InjectCABundleFn: func(obj client.Object, cfg render.CertificateProvisionerConfig) error {
-			obj.SetAnnotations(map[string]string{
-				"cert-provider": "annotation",
-			})
-			return nil
-		},
-	}
 	for _, tc := range []struct {
 		name              string
 		bundle            *bundle.RegistryV1
@@ -1937,61 +1831,6 @@ func Test_BundleMutatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 				},
 			},
 		},
-		{
-			name: "generates validating webhook configuration resources with certificate provider modifications",
-			bundle: &bundle.RegistryV1{
-				CSV: clusterserviceversion.Builder().
-					WithWebhookDefinitions(
-						v1alpha1.WebhookDescription{
-							Type:           v1alpha1.MutatingAdmissionWebhook,
-							GenerateName:   "my-webhook",
-							DeploymentName: "my-deployment",
-							ContainerPort:  443,
-						},
-					).Build(),
-			},
-			opts: render.Options{
-				TargetNamespaces:    []string{"watch-namespace-one", "watch-namespace-two"},
-				CertificateProvider: fakeProvider,
-			},
-			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
-			expectedResources: []client.Object{
-				&admissionregistrationv1.MutatingWebhookConfiguration{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       "MutatingWebhookConfiguration",
-						APIVersion: admissionregistrationv1.SchemeGroupVersion.String(),
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "my-webhook",
-						Namespace: "install-namespace",
-						Annotations: map[string]string{
-							"cert-provider": "annotation",
-						},
-					},
-					Webhooks: []admissionregistrationv1.MutatingWebhook{
-						{
-							Name: "my-webhook",
-							ClientConfig: admissionregistrationv1.WebhookClientConfig{
-								Service: &admissionregistrationv1.ServiceReference{
-									Namespace: "install-namespace",
-									Name:      "my-deployment-service",
-									Port:      ptr.To(int32(443)),
-								},
-							},
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchExpressions: []metav1.LabelSelectorRequirement{
-									{
-										Key:      "kubernetes.io/metadata.name",
-										Operator: metav1.LabelSelectorOpIn,
-										Values:   []string{"watch-namespace-one", "watch-namespace-two"},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := generators.BundleMutatingWebhookResourceGenerator(*tc.bundle, tc.opts, tc.genCtx)
@@ -2002,14 +1841,6 @@ func Test_BundleMutatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 }
 
 func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
-	fakeProvider := FakeCertProvider{
-		InjectCABundleFn: func(obj client.Object, cfg render.CertificateProvisionerConfig) error {
-			obj.SetAnnotations(map[string]string{
-				"cert-provider": "annotation",
-			})
-			return nil
-		},
-	}
 	for _, tc := range []struct {
 		name              string
 		bundle            *bundle.RegistryV1
@@ -2359,54 +2190,6 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 				},
 			},
 		},
-		{
-			name: "applies cert provider modifiers to webhook service",
-			bundle: &bundle.RegistryV1{
-				CSV: clusterserviceversion.Builder().
-					WithStrategyDeploymentSpecs(
-						v1alpha1.StrategyDeploymentSpec{
-							Name: "my-deployment",
-						}).
-					WithWebhookDefinitions(
-						v1alpha1.WebhookDescription{
-							Type:           v1alpha1.MutatingAdmissionWebhook,
-							DeploymentName: "my-deployment",
-						},
-					).Build(),
-			},
-			opts: render.Options{
-				TargetNamespaces:    []string{"watch-namespace-one", "watch-namespace-two"},
-				CertificateProvider: fakeProvider,
-			},
-			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
-			expectedResources: []client.Object{
-				&corev1.Service{
-					TypeMeta: metav1.TypeMeta{
-						Kind:       "Service",
-						APIVersion: corev1.SchemeGroupVersion.String(),
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "my-deployment-service",
-						Namespace: "install-namespace",
-						Annotations: map[string]string{
-							"cert-provider": "annotation",
-						},
-					},
-					Spec: corev1.ServiceSpec{
-						Ports: []corev1.ServicePort{
-							{
-								Name: "443",
-								Port: int32(443),
-								TargetPort: intstr.IntOrString{
-									Type:   intstr.Int,
-									IntVal: 443,
-								},
-							},
-						},
-					},
-				},
-			},
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := generators.BundleDeploymentServiceResourceGenerator(*tc.bundle, tc.opts, tc.genCtx)
@@ -2418,6 +2201,12 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 
 func Test_CertProviderResourceGenerator_Succeeds(t *testing.T) {
 	fakeProvider := FakeCertProvider{
+		InjectCABundleFn: func(obj client.Object, cfg render.CertificateProvisionerConfig) error {
+			obj.SetAnnotations(map[string]string{
+				"cert-provider": "annotation",
+			})
+			return nil
+		},
 		AdditionalObjectsFn: func(cfg render.CertificateProvisionerConfig) ([]unstructured.Unstructured, error) {
 			return []unstructured.Unstructured{*ToUnstructuredT(t, &corev1.Secret{
 				TypeMeta: metav1.TypeMeta{Kind: "Secret", APIVersion: corev1.SchemeGroupVersion.String()},
@@ -2428,13 +2217,31 @@ func Test_CertProviderResourceGenerator_Succeeds(t *testing.T) {
 		},
 	}
 
-	ctx := &render.GeneratorContext{InstallNamespace: "install-namespace"}
+	ctx := &render.GeneratorContext{
+		InstallNamespace: "install-namespace",
+		Objects: []client.Object{
+			&apiextensionsv1.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: "my-crd"}},
+			&admissionregistrationv1.ValidatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{Name: "my-validating-webhook"}},
+			&admissionregistrationv1.MutatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{Name: "my-mutating-webhook"}},
+			&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "my-deployment-service"}},
+		},
+	}
 	err := generators.CertProviderResourceGenerator(bundle.RegistryV1{
 		CSV: clusterserviceversion.Builder().
 			WithWebhookDefinitions(
-				// only generate resources for deployments referenced by webhook definitions
+				v1alpha1.WebhookDescription{
+					Type:           v1alpha1.ConversionWebhook,
+					DeploymentName: "my-deployment",
+					ConversionCRDs: []string{"my-crd"},
+				},
+				v1alpha1.WebhookDescription{
+					Type:           v1alpha1.ValidatingAdmissionWebhook,
+					GenerateName:   "my-validating-webhook",
+					DeploymentName: "my-deployment",
+				},
 				v1alpha1.WebhookDescription{
 					Type:           v1alpha1.MutatingAdmissionWebhook,
+					GenerateName:   "my-mutating-webhook",
 					DeploymentName: "my-deployment",
 				},
 			).
@@ -2451,6 +2258,22 @@ func Test_CertProviderResourceGenerator_Succeeds(t *testing.T) {
 	}, ctx)
 	require.NoError(t, err)
 	require.Equal(t, []client.Object{
+		&apiextensionsv1.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{
+			Name:        "my-crd",
+			Annotations: map[string]string{"cert-provider": "annotation"},
+		}},
+		&admissionregistrationv1.ValidatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{
+			Name:        "my-validating-webhook",
+			Annotations: map[string]string{"cert-provider": "annotation"},
+		}},
+		&admissionregistrationv1.MutatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{
+			Name:        "my-mutating-webhook",
+			Annotations: map[string]string{"cert-provider": "annotation"},
+		}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{
+			Name:        "my-deployment-service",
+			Annotations: map[string]string{"cert-provider": "annotation"},
+		}},
 		ToUnstructuredT(t, &corev1.Secret{
 			TypeMeta:   metav1.TypeMeta{Kind: "Secret", APIVersion: corev1.SchemeGroupVersion.String()},
 			ObjectMeta: metav1.ObjectMeta{Name: "my-deployment-service-cert"},

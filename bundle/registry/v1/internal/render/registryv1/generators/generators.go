@@ -63,13 +63,6 @@ var certVolumeConfigs = []certVolumeConfig{
 // - the deployment spec's revision history limit is set to 1
 // - merges csv annotations to the deployment template's annotations
 func BundleCSVDeploymentGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
-
-	// collect deployments that service webhooks
-	webhookDeployments := sets.Set[string]{}
-	for _, wh := range rv1.CSV.Spec.WebhookDefinitions {
-		webhookDeployments.Insert(wh.DeploymentName)
-	}
-
 	objs := make([]client.Object, 0, len(rv1.CSV.Spec.InstallStrategy.StrategySpec.DeploymentSpecs))
 	for _, depSpec := range rv1.CSV.Spec.InstallStrategy.StrategySpec.DeploymentSpecs {
 		// Add CSV annotations to template annotations
@@ -95,11 +88,6 @@ func BundleCSVDeploymentGenerator(rv1 bundle.RegistryV1, opts render.Options, ct
 			WithDeploymentSpec(depSpec.Spec),
 			WithLabels(depSpec.Label),
 		)
-
-		secretInfo := render.CertProvisionerFor(types.NamespacedName{Name: depSpec.Name, Namespace: ctx.InstallNamespace}, opts).GetCertSecretInfo()
-		if webhookDeployments.Has(depSpec.Name) && secretInfo != nil {
-			ensureCorrectDeploymentCertVolumes(deploymentResource, *secretInfo)
-		}
 
 		// Apply deployment configuration if provided
 		applyCustomConfigToDeployment(deploymentResource, opts.DeploymentConfig)
@@ -251,14 +239,13 @@ func BundleCRDGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.
 				conversionWebhookPath = *cw.WebhookPath
 			}
 
-			certProvisioner := render.CertProvisionerFor(types.NamespacedName{Name: cw.DeploymentName, Namespace: ctx.InstallNamespace}, opts)
 			cp.Spec.Conversion = &apiextensionsv1.CustomResourceConversion{
 				Strategy: apiextensionsv1.WebhookConverter,
 				Webhook: &apiextensionsv1.WebhookConversion{
 					ClientConfig: &apiextensionsv1.WebhookClientConfig{
 						Service: &apiextensionsv1.ServiceReference{
 							Namespace: ctx.InstallNamespace,
-							Name:      certProvisioner.ServiceName,
+							Name:      render.WebhookServiceNameForDeployment(cw.DeploymentName),
 							Path:      &conversionWebhookPath,
 							Port:      &cw.ContainerPort,
 						},
@@ -267,9 +254,6 @@ func BundleCRDGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.
 				},
 			}
 
-			if err := certProvisioner.InjectCABundle(cp); err != nil {
-				return err
-			}
 		}
 		objs = append(objs, cp)
 	}
@@ -310,7 +294,6 @@ func BundleValidatingWebhookResourceGenerator(rv1 bundle.RegistryV1, opts render
 		if wh.Type != v1alpha1.ValidatingAdmissionWebhook {
 			continue
 		}
-		certProvisioner := render.CertProvisionerFor(types.NamespacedName{Name: wh.DeploymentName, Namespace: ctx.InstallNamespace}, opts)
 		webhookName := strings.TrimSuffix(wh.GenerateName, "-")
 		webhookResource := CreateValidatingWebhookConfigurationResource(
 			webhookName,
@@ -328,7 +311,7 @@ func BundleValidatingWebhookResourceGenerator(rv1 bundle.RegistryV1, opts render
 					ClientConfig: admissionregistrationv1.WebhookClientConfig{
 						Service: &admissionregistrationv1.ServiceReference{
 							Namespace: ctx.InstallNamespace,
-							Name:      certProvisioner.ServiceName,
+							Name:      render.WebhookServiceNameForDeployment(wh.DeploymentName),
 							Path:      wh.WebhookPath,
 							Port:      &wh.ContainerPort,
 						},
@@ -339,9 +322,6 @@ func BundleValidatingWebhookResourceGenerator(rv1 bundle.RegistryV1, opts render
 				},
 			),
 		)
-		if err := certProvisioner.InjectCABundle(webhookResource); err != nil {
-			return err
-		}
 		objs = append(objs, webhookResource)
 	}
 	ctx.Objects = append(ctx.Objects, objs...)
@@ -359,7 +339,6 @@ func BundleMutatingWebhookResourceGenerator(rv1 bundle.RegistryV1, opts render.O
 		if wh.Type != v1alpha1.MutatingAdmissionWebhook {
 			continue
 		}
-		certProvisioner := render.CertProvisionerFor(types.NamespacedName{Name: wh.DeploymentName, Namespace: ctx.InstallNamespace}, opts)
 		webhookName := strings.TrimSuffix(wh.GenerateName, "-")
 		webhookResource := CreateMutatingWebhookConfigurationResource(
 			webhookName,
@@ -377,7 +356,7 @@ func BundleMutatingWebhookResourceGenerator(rv1 bundle.RegistryV1, opts render.O
 					ClientConfig: admissionregistrationv1.WebhookClientConfig{
 						Service: &admissionregistrationv1.ServiceReference{
 							Namespace: ctx.InstallNamespace,
-							Name:      certProvisioner.ServiceName,
+							Name:      render.WebhookServiceNameForDeployment(wh.DeploymentName),
 							Path:      wh.WebhookPath,
 							Port:      &wh.ContainerPort,
 						},
@@ -389,9 +368,6 @@ func BundleMutatingWebhookResourceGenerator(rv1 bundle.RegistryV1, opts render.O
 				},
 			),
 		)
-		if err := certProvisioner.InjectCABundle(webhookResource); err != nil {
-			return err
-		}
 		objs = append(objs, webhookResource)
 	}
 	ctx.Objects = append(ctx.Objects, objs...)
@@ -429,9 +405,8 @@ func BundleDeploymentServiceResourceGenerator(rv1 bundle.RegistryV1, opts render
 			labelSelector = deploymentSpec.Spec.Selector.MatchLabels
 		}
 
-		certProvisioner := render.CertProvisionerFor(types.NamespacedName{Name: deploymentSpec.Name, Namespace: ctx.InstallNamespace}, opts)
 		serviceResource := CreateServiceResource(
-			certProvisioner.ServiceName,
+			render.WebhookServiceNameForDeployment(deploymentSpec.Name),
 			ctx.InstallNamespace,
 			WithServiceSpec(
 				corev1.ServiceSpec{
@@ -441,9 +416,6 @@ func BundleDeploymentServiceResourceGenerator(rv1 bundle.RegistryV1, opts render
 			),
 		)
 
-		if err := certProvisioner.InjectCABundle(serviceResource); err != nil {
-			return err
-		}
 		objs = append(objs, serviceResource)
 	}
 
@@ -451,27 +423,85 @@ func BundleDeploymentServiceResourceGenerator(rv1 bundle.RegistryV1, opts render
 	return nil
 }
 
-// CertProviderResourceGenerator generates any resources necessary for the CertificateProvider
-// in opts to function correctly, e.g. Issuer or Certificate resources.
+// CertProviderResourceGenerator applies certificate-provider changes after all
+// ordinary resources have been generated, then appends provider resources.
 func CertProviderResourceGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+	certProvisionerForDeployment := func(deploymentName string) render.CertificateProvisioner {
+		service := types.NamespacedName{
+			Name:      render.WebhookServiceNameForDeployment(deploymentName),
+			Namespace: ctx.InstallNamespace,
+		}
+		return render.CertProvisionerForService(service, opts)
+	}
+
 	deploymentsWithWebhooks := sets.Set[string]{}
+	conversionCRDs := map[string]render.CertificateProvisioner{}
+	validatingWebhooks := map[string]render.CertificateProvisioner{}
+	mutatingWebhooks := map[string]render.CertificateProvisioner{}
+	services := map[string]render.CertificateProvisioner{}
 
 	for _, wh := range rv1.CSV.Spec.WebhookDefinitions {
 		deploymentsWithWebhooks.Insert(wh.DeploymentName)
+		provisioner := certProvisionerForDeployment(wh.DeploymentName)
+		services[provisioner.ServiceName] = provisioner
+		switch wh.Type {
+		case v1alpha1.ConversionWebhook:
+			for _, crdName := range wh.ConversionCRDs {
+				conversionCRDs[crdName] = provisioner
+			}
+		case v1alpha1.ValidatingAdmissionWebhook:
+			validatingWebhooks[strings.TrimSuffix(wh.GenerateName, "-")] = provisioner
+		case v1alpha1.MutatingAdmissionWebhook:
+			mutatingWebhooks[strings.TrimSuffix(wh.GenerateName, "-")] = provisioner
+		}
 	}
 
-	var objs []client.Object
+	for _, obj := range ctx.Objects {
+		switch obj := obj.(type) {
+		case *appsv1.Deployment:
+			if deploymentsWithWebhooks.Has(obj.Name) {
+				secretInfo := certProvisionerForDeployment(obj.Name).GetCertSecretInfo()
+				if secretInfo != nil {
+					ensureCorrectDeploymentCertVolumes(obj, *secretInfo)
+				}
+			}
+		case *apiextensionsv1.CustomResourceDefinition:
+			if provisioner, ok := conversionCRDs[obj.Name]; ok {
+				if err := provisioner.InjectCABundle(obj); err != nil {
+					return err
+				}
+			}
+		case *admissionregistrationv1.ValidatingWebhookConfiguration:
+			if provisioner, ok := validatingWebhooks[obj.Name]; ok {
+				if err := provisioner.InjectCABundle(obj); err != nil {
+					return err
+				}
+			}
+		case *admissionregistrationv1.MutatingWebhookConfiguration:
+			if provisioner, ok := mutatingWebhooks[obj.Name]; ok {
+				if err := provisioner.InjectCABundle(obj); err != nil {
+					return err
+				}
+			}
+		case *corev1.Service:
+			if provisioner, ok := services[obj.Name]; ok {
+				if err := provisioner.InjectCABundle(obj); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	for _, depName := range deploymentsWithWebhooks.UnsortedList() {
-		certCfg := render.CertProvisionerFor(types.NamespacedName{Name: depName, Namespace: ctx.InstallNamespace}, opts)
-		certObjs, err := certCfg.AdditionalObjects()
+		certCfg := certProvisionerForDeployment(depName)
+		additionalObjs, err := certCfg.AdditionalObjects()
 		if err != nil {
 			return err
 		}
-		for _, certObj := range certObjs {
-			objs = append(objs, &certObj)
+		for _, additionalObj := range additionalObjs {
+			ctx.Objects = append(ctx.Objects, &additionalObj)
 		}
 	}
-	ctx.Objects = append(ctx.Objects, objs...)
 	return nil
 }
 

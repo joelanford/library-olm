@@ -19,14 +19,23 @@ type FakeCertProvider struct {
 }
 
 func (f FakeCertProvider) InjectCABundle(obj client.Object, cfg render.CertificateProvisionerConfig) error {
+	if f.InjectCABundleFn == nil {
+		return nil
+	}
 	return f.InjectCABundleFn(obj, cfg)
 }
 
 func (f FakeCertProvider) AdditionalObjects(cfg render.CertificateProvisionerConfig) ([]unstructured.Unstructured, error) {
+	if f.AdditionalObjectsFn == nil {
+		return nil, nil
+	}
 	return f.AdditionalObjectsFn(cfg)
 }
 
 func (f FakeCertProvider) GetCertSecretInfo(cfg render.CertificateProvisionerConfig) render.CertSecretInfo {
+	if f.GetCertSecretInfoFn == nil {
+		return render.CertSecretInfo{}
+	}
 	return f.GetCertSecretInfoFn(cfg)
 }
 
