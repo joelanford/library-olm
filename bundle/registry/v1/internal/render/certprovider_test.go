@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
@@ -101,8 +102,7 @@ func Test_CertificateProvisioner_Errors(t *testing.T) {
 
 func Test_CertProvisionerFor(t *testing.T) {
 	fakeProvider := &FakeCertProvider{}
-	prov := render.CertProvisionerFor("my.deployment.thing", render.Options{
-		InstallNamespace:    "my-namespace",
+	prov := render.CertProvisionerFor(types.NamespacedName{Name: "my.deployment.thing", Namespace: "my-namespace"}, render.Options{
 		CertificateProvider: fakeProvider,
 	})
 
@@ -113,7 +113,7 @@ func Test_CertProvisionerFor(t *testing.T) {
 }
 
 func Test_CertProvisionerFor_ExtraLargeName_MoreThan63Chars(t *testing.T) {
-	prov := render.CertProvisionerFor("my.object.thing.has.a.really.really.really.really.really.long.name", render.Options{})
+	prov := render.CertProvisionerFor(types.NamespacedName{Name: "my.object.thing.has.a.really.really.really.really.really.long.name"}, render.Options{})
 
 	require.Len(t, prov.ServiceName, 63)
 	require.Len(t, prov.CertName, 63)

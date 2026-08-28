@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/util"
@@ -60,10 +61,10 @@ func (c CertificateProvisioner) GetCertSecretInfo() *CertSecretInfo {
 	return &info
 }
 
-func CertProvisionerFor(deploymentName string, opts Options) CertificateProvisioner {
+func CertProvisionerFor(deployment types.NamespacedName, opts Options) CertificateProvisioner {
 	// maintaining parity with OLMv0 naming
 	// See https://github.com/operator-framework/operator-lifecycle-manager/blob/658a6a60de8315f055f54aa7e50771ee4daa8983/pkg/controller/install/webhook.go#L254
-	webhookServiceName := util.ObjectNameForBaseAndSuffix(strings.ReplaceAll(deploymentName, ".", "-"), "service")
+	webhookServiceName := util.ObjectNameForBaseAndSuffix(strings.ReplaceAll(deployment.Name, ".", "-"), "service")
 
 	// maintaining parity with cert secret name in OLMv0
 	// See https://github.com/operator-framework/operator-lifecycle-manager/blob/658a6a60de8315f055f54aa7e50771ee4daa8983/pkg/controller/install/certresources.go#L151
@@ -72,7 +73,7 @@ func CertProvisionerFor(deploymentName string, opts Options) CertificateProvisio
 	return CertificateProvisioner{
 		CertProvider: opts.CertificateProvider,
 		ServiceName:  webhookServiceName,
-		Namespace:    opts.InstallNamespace,
+		Namespace:    deployment.Namespace,
 		CertName:     certName,
 	}
 }

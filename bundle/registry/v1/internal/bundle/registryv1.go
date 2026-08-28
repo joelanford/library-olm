@@ -33,6 +33,17 @@ type RegistryV1 struct {
 	Others      []unstructured.Unstructured
 }
 
+// SupportedInstallModes returns the supported install modes declared by a bundle.
+func SupportedInstallModes(rv1 RegistryV1) sets.Set[v1alpha1.InstallModeType] {
+	supportedInstallModes := sets.New[v1alpha1.InstallModeType]()
+	for _, im := range rv1.CSV.Spec.InstallModes {
+		if im.Supported {
+			supportedInstallModes.Insert(im.Type)
+		}
+	}
+	return supportedInstallModes
+}
+
 // GetConfigSchema builds a validation schema based on what install modes the operator supports.
 //
 // For registry+v1 bundles, we look at the CSV's install modes and generate a schema
