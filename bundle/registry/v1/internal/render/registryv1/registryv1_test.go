@@ -45,6 +45,7 @@ func Test_BundleValidatorHasAllValidationFns(t *testing.T) {
 
 func Test_ResourceGeneratorsHasAllGenerators(t *testing.T) {
 	expectedGenerators := []render.ResourceGenerator{
+		generators.BundleNamespaceGenerator,
 		generators.BundleCSVServiceAccountGenerator,
 		generators.BundleCSVPermissionsGenerator,
 		generators.BundleCSVClusterPermissionsGenerator,

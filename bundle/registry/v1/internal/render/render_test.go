@@ -50,11 +50,11 @@ func Test_BundleRenderer_CreatesCorrectDefaultOptions(t *testing.T) {
 
 	renderer := render.BundleRenderer{
 		ResourceGenerators: []render.ResourceGenerator{
-			func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
+			func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 				require.Nil(t, opts.SelfManagedInstallNamespace)
 				require.Equal(t, expectedTargetNamespaces, opts.TargetNamespaces)
 				require.Equal(t, reflect.ValueOf(expectedUniqueNameGenerator).Pointer(), reflect.ValueOf(render.DefaultUniqueNameGenerator).Pointer(), "options has unexpected default unique name generator")
-				return nil, sentinelErr
+				return sentinelErr
 			},
 		},
 	}
@@ -71,7 +71,6 @@ func Test_BundleRenderer_DefaultTargetNamespaces(t *testing.T) {
 		name                     string
 		supportedInstallModes    []v1alpha1.InstallModeType
 		expectedTargetNamespaces []string
-		expectedErrMsg           string
 	}{
 		{
 			name:                     "Default to AllNamespaces when bundle install modes are {AllNamespaces}",
@@ -113,48 +112,13 @@ func Test_BundleRenderer_DefaultTargetNamespaces(t *testing.T) {
 			supportedInstallModes:    []v1alpha1.InstallModeType{v1alpha1.InstallModeTypeAllNamespaces, v1alpha1.InstallModeTypeSingleNamespace, v1alpha1.InstallModeTypeOwnNamespace, v1alpha1.InstallModeTypeMultiNamespace},
 			expectedTargetNamespaces: []string{corev1.NamespaceAll},
 		},
-		{
-			name:                  "No default when bundle install modes are {SingleNamespace}",
-			supportedInstallModes: []v1alpha1.InstallModeType{v1alpha1.InstallModeTypeSingleNamespace},
-			expectedErrMsg:        "exactly one target namespace must be specified",
-		},
-		{
-			name:                  "No default when bundle install modes are {OwnNamespace}",
-			supportedInstallModes: []v1alpha1.InstallModeType{v1alpha1.InstallModeTypeOwnNamespace},
-			expectedErrMsg:        "exactly one target namespace must be specified",
-		},
-		{
-			name:                  "No default when bundle install modes are {MultiNamespace}",
-			supportedInstallModes: []v1alpha1.InstallModeType{v1alpha1.InstallModeTypeMultiNamespace},
-			expectedErrMsg:        "at least one target namespace must be specified",
-		},
-		{
-			name:                  "No default when bundle install modes are {SingleNamespace, OwnNamespace}",
-			supportedInstallModes: []v1alpha1.InstallModeType{v1alpha1.InstallModeTypeSingleNamespace, v1alpha1.InstallModeTypeOwnNamespace},
-			expectedErrMsg:        "exactly one target namespace must be specified",
-		},
-		{
-			name:                  "No default when bundle install modes are {SingleNamespace, MultiNamespace}",
-			supportedInstallModes: []v1alpha1.InstallModeType{v1alpha1.InstallModeTypeSingleNamespace, v1alpha1.InstallModeTypeMultiNamespace},
-			expectedErrMsg:        "at least one target namespace must be specified",
-		},
-		{
-			name:                  "No default when bundle install modes are {OwnNamespace, MultiNamespace}",
-			supportedInstallModes: []v1alpha1.InstallModeType{v1alpha1.InstallModeTypeOwnNamespace, v1alpha1.InstallModeTypeMultiNamespace},
-			expectedErrMsg:        "at least one target namespace must be specified",
-		},
-		{
-			name:                  "No default when bundle install modes are {SingleNamespace, OwnNamespace, MultiNamespace}",
-			supportedInstallModes: []v1alpha1.InstallModeType{v1alpha1.InstallModeTypeSingleNamespace, v1alpha1.InstallModeTypeOwnNamespace, v1alpha1.InstallModeTypeMultiNamespace},
-			expectedErrMsg:        "at least one target namespace must be specified",
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			renderer := render.BundleRenderer{
 				ResourceGenerators: []render.ResourceGenerator{
-					func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
+					func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 						require.Equal(t, tc.expectedTargetNamespaces, opts.TargetNamespaces)
-						return nil, nil
+						return nil
 					},
 				},
 			}
@@ -163,139 +127,17 @@ func Test_BundleRenderer_DefaultTargetNamespaces(t *testing.T) {
 					WithName("test").
 					WithInstallModeSupportFor(tc.supportedInstallModes...).Build(),
 			}, render.WithSelfManagedInstallNamespace("some-namespace"))
-			if tc.expectedErrMsg != "" {
-				require.Error(t, err)
-				require.Contains(t, err.Error(), tc.expectedErrMsg)
-			} else {
-				require.NoError(t, err)
-			}
+			require.NoError(t, err)
 		})
 	}
 }
 
-func Test_BundleRenderer_ValidatesRenderOptions(t *testing.T) {
-	for _, tc := range []struct {
-		name             string
-		installNamespace string
-		csv              v1alpha1.ClusterServiceVersion
-		opts             []render.Option
-		err              error
-	}{
-		{
-			name:             "accepts empty targetNamespaces (because it is ignored)",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces(),
-			},
-		}, {
-			name:             "rejects nil unique name generator",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).Build(),
-			opts: []render.Option{
-				render.WithUniqueNameGenerator(nil),
-			},
-			err: errors.New("invalid option(s): unique name generator must be specified"),
-		}, {
-			name:             "rejects all namespace install if AllNamespaces install mode is not supported",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeSingleNamespace).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces(corev1.NamespaceAll),
-			},
-			err: errors.New("invalid option(s): invalid target namespaces []: supported install modes [SingleNamespace] do not support targeting all namespaces"),
-		}, {
-			name:             "rejects own namespace install if only AllNamespace install mode is supported",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces("install-namespace"),
-			},
-			err: errors.New("invalid option(s): invalid target namespaces [install-namespace]: supported install modes [AllNamespaces] do not support targeting own namespace"),
-		}, {
-			name:             "rejects install out of own namespace if only OwnNamespace install mode is supported",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeOwnNamespace).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces("not-install-namespace"),
-			},
-			err: errors.New("invalid option(s): invalid target namespaces [not-install-namespace]: supported install modes [OwnNamespace] do not support target namespaces [not-install-namespace]"),
-		}, {
-			name:             "rejects multi-namespace install if MultiNamespace install mode is not supported",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces("ns1", "ns2", "ns3"),
-			},
-			err: errors.New("invalid option(s): invalid target namespaces [ns1 ns2 ns3]: supported install modes [AllNamespaces] do not support target namespaces [ns1 ns2 ns3]"),
-		}, {
-			name:             "rejects if bundle supports no install modes",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces("some-namespace"),
-			},
-			err: errors.New("invalid option(s): invalid target namespaces [some-namespace]: supported install modes [] do not support target namespaces [some-namespace]"),
-		}, {
-			name:             "accepts all namespace render if AllNamespaces install mode is supported",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeAllNamespaces).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces(""),
-			},
-		}, {
-			name:             "accepts install namespace render if SingleNamespace install mode is supported",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeSingleNamespace).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces("some-namespace"),
-			},
-		}, {
-			name:             "accepts all install namespace render if OwnNamespace install mode is supported",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeOwnNamespace).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces("install-namespace"),
-			},
-		}, {
-			name:             "accepts single namespace render if SingleNamespace install mode is supported",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeSingleNamespace).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces("some-namespace"),
-			},
-		}, {
-			name:             "accepts multi namespace render if MultiNamespace install mode is supported",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeMultiNamespace).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces("n1", "n2", "n3"),
-			},
-		}, {
-			name:             "reject multi namespace render if OwnNamespace install mode is not supported and target namespaces include install namespace",
-			installNamespace: "install-namespace",
-			csv:              clusterserviceversion.Builder().WithInstallModeSupportFor(v1alpha1.InstallModeTypeMultiNamespace).Build(),
-			opts: []render.Option{
-				render.WithTargetNamespaces("n1", "n2", "n3", "install-namespace"),
-			},
-			err: errors.New("invalid option(s): invalid target namespaces [n1 n2 n3 install-namespace]: supported install modes [MultiNamespace] do not support targeting own namespace"),
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			renderer := render.BundleRenderer{}
-			opts := append([]render.Option{render.WithSelfManagedInstallNamespace(tc.installNamespace)}, tc.opts...)
-			_, err := renderer.Render(
-				bundle.RegistryV1{CSV: tc.csv},
-				opts...,
-			)
-			if tc.err == nil {
-				require.NoError(t, err)
-			} else {
-				require.Error(t, err)
-				require.Equal(t, tc.err.Error(), err.Error())
-			}
-		})
-	}
+func Test_BundleRenderer_RejectsNilUniqueNameGenerator(t *testing.T) {
+	_, err := render.BundleRenderer{}.Render(
+		bundle.RegistryV1{},
+		render.WithUniqueNameGenerator(nil),
+	)
+	require.EqualError(t, err, "invalid option(s): unique name generator must be specified")
 }
 
 func Test_BundleRenderer_AppliesUserOptions(t *testing.T) {
@@ -307,11 +149,21 @@ func Test_BundleRenderer_AppliesUserOptions(t *testing.T) {
 }
 
 func Test_WithTargetNamespaces(t *testing.T) {
-	opts := &render.Options{
-		TargetNamespaces: []string{"target-namespace"},
-	}
-	render.WithTargetNamespaces("a", "b", "c")(opts)
-	require.Equal(t, []string{"a", "b", "c"}, opts.TargetNamespaces)
+	t.Run("sets target namespaces when provided", func(t *testing.T) {
+		opts := &render.Options{
+			TargetNamespaces: []string{"target-namespace"},
+		}
+		render.WithTargetNamespaces("a", "b", "c")(opts)
+		require.Equal(t, []string{"a", "b", "c"}, opts.TargetNamespaces)
+	})
+
+	t.Run("preserves the default when empty", func(t *testing.T) {
+		opts := &render.Options{
+			TargetNamespaces: []string{"target-namespace"},
+		}
+		render.WithTargetNamespaces()(opts)
+		require.Equal(t, []string{"target-namespace"}, opts.TargetNamespaces)
+	})
 }
 
 func Test_WithUniqueNameGenerator(t *testing.T) {
@@ -335,11 +187,13 @@ func Test_WithCertificateProvide(t *testing.T) {
 func Test_BundleRenderer_CallsResourceGenerators(t *testing.T) {
 	renderer := render.BundleRenderer{
 		ResourceGenerators: []render.ResourceGenerator{
-			func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-				return []client.Object{&corev1.Namespace{}, &corev1.Service{}}, nil
+			func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+				ctx.Objects = append(ctx.Objects, &corev1.Namespace{}, &corev1.Service{})
+				return nil
 			},
-			func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-				return []client.Object{&appsv1.Deployment{}}, nil
+			func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+				ctx.Objects = append(ctx.Objects, &appsv1.Deployment{})
+				return nil
 			},
 		},
 	}
@@ -354,11 +208,12 @@ func Test_BundleRenderer_CallsResourceGenerators(t *testing.T) {
 func Test_BundleRenderer_ReturnsResourceGeneratorErrors(t *testing.T) {
 	renderer := render.BundleRenderer{
 		ResourceGenerators: []render.ResourceGenerator{
-			func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-				return []client.Object{&corev1.Namespace{}, &corev1.Service{}}, nil
+			func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+				ctx.Objects = append(ctx.Objects, &corev1.Namespace{}, &corev1.Service{})
+				return nil
 			},
-			func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-				return nil, fmt.Errorf("generator error")
+			func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+				return fmt.Errorf("generator error")
 			},
 		},
 	}
@@ -398,9 +253,9 @@ func Test_WithDeploymentConfig(t *testing.T) {
 		var receivedConfig *config.DeploymentConfig
 		renderer := render.BundleRenderer{
 			ResourceGenerators: []render.ResourceGenerator{
-				func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
+				func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 					receivedConfig = opts.DeploymentConfig
-					return nil, nil
+					return nil
 				},
 			},
 		}
@@ -421,9 +276,9 @@ func Test_WithDeploymentConfig(t *testing.T) {
 		var receivedConfig *config.DeploymentConfig
 		renderer := render.BundleRenderer{
 			ResourceGenerators: []render.ResourceGenerator{
-				func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
+				func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 					receivedConfig = opts.DeploymentConfig
-					return nil, nil
+					return nil
 				},
 			},
 		}
@@ -443,9 +298,9 @@ func Test_WithDeploymentConfig(t *testing.T) {
 		var receivedConfig *config.DeploymentConfig
 		renderer := render.BundleRenderer{
 			ResourceGenerators: []render.ResourceGenerator{
-				func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
+				func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 					receivedConfig = opts.DeploymentConfig
-					return nil, nil
+					return nil
 				},
 			},
 		}

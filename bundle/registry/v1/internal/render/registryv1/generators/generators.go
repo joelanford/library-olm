@@ -16,6 +16,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
@@ -58,13 +59,10 @@ var certVolumeConfigs = []certVolumeConfig{
 // BundleCSVDeploymentGenerator generates all deployments defined in rv1's cluster service version (CSV). The generated
 // resource aim to have parity with OLMv0 generated Deployment resources:
 // - olm.targetNamespaces annotation is set with the opts.TargetNamespace value
-// - olm.operatorNamespace annotation is set with the opts.InstallNamespace value
+// - olm.operatorNamespace annotation is set with the resolved install namespace
 // - the deployment spec's revision history limit is set to 1
 // - merges csv annotations to the deployment template's annotations
-func BundleCSVDeploymentGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-	if rv1 == nil {
-		return nil, fmt.Errorf("bundle cannot be nil")
-	}
+func BundleCSVDeploymentGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 
 	// collect deployments that service webhooks
 	webhookDeployments := sets.Set[string]{}
@@ -84,7 +82,7 @@ func BundleCSVDeploymentGenerator(rv1 *bundle.RegistryV1, opts render.Options) (
 		// See https://github.com/operator-framework/operator-lifecycle-manager/blob/dfd0b2bea85038d3c0d65348bc812d297f16b8d2/pkg/controller/operators/olm/operatorgroup.go#L279
 		// When the CSVs annotations are copied to the deployment template's annotations, they bring with it these annotations
 		annotations["olm.targetNamespaces"] = strings.Join(opts.TargetNamespaces, ",")
-		annotations["olm.operatorNamespace"] = opts.InstallNamespace
+		annotations["olm.operatorNamespace"] = ctx.InstallNamespace
 		depSpec.Spec.Template.Annotations = annotations
 
 		// Hardcode the deployment with RevisionHistoryLimit=1 to maintain parity with OLMv0 behaviour.
@@ -93,12 +91,12 @@ func BundleCSVDeploymentGenerator(rv1 *bundle.RegistryV1, opts render.Options) (
 
 		deploymentResource := CreateDeploymentResource(
 			depSpec.Name,
-			opts.InstallNamespace,
+			ctx.InstallNamespace,
 			WithDeploymentSpec(depSpec.Spec),
 			WithLabels(depSpec.Label),
 		)
 
-		secretInfo := render.CertProvisionerFor(depSpec.Name, opts).GetCertSecretInfo()
+		secretInfo := render.CertProvisionerFor(types.NamespacedName{Name: depSpec.Name, Namespace: ctx.InstallNamespace}, opts).GetCertSecretInfo()
 		if webhookDeployments.Has(depSpec.Name) && secretInfo != nil {
 			ensureCorrectDeploymentCertVolumes(deploymentResource, *secretInfo)
 		}
@@ -108,20 +106,18 @@ func BundleCSVDeploymentGenerator(rv1 *bundle.RegistryV1, opts render.Options) (
 
 		objs = append(objs, deploymentResource)
 	}
-	return objs, nil
+	ctx.Objects = append(ctx.Objects, objs...)
+	return nil
 }
 
 // BundleCSVPermissionsGenerator generates the Roles and RoleBindings based on bundle's cluster service version
 // permission spec. If the bundle is being installed in AllNamespaces mode (opts.TargetNamespaces = [”])
 // no resources will be generated as these permissions will be promoted to ClusterRole/Bunding(s)
-func BundleCSVPermissionsGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-	if rv1 == nil {
-		return nil, fmt.Errorf("bundle cannot be nil")
-	}
+func BundleCSVPermissionsGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 
 	// If we're in AllNamespaces mode permissions will be treated as clusterPermissions
 	if len(opts.TargetNamespaces) == 1 && opts.TargetNamespaces[0] == "" {
-		return nil, nil
+		return nil
 	}
 
 	permissions := rv1.CSV.Spec.InstallStrategy.StrategySpec.Permissions
@@ -137,13 +133,14 @@ func BundleCSVPermissionsGenerator(rv1 *bundle.RegistryV1, opts render.Options) 
 				CreateRoleBindingResource(
 					name,
 					ns,
-					WithSubjects(rbacv1.Subject{Kind: "ServiceAccount", Namespace: opts.InstallNamespace, Name: saName}),
+					WithSubjects(rbacv1.Subject{Kind: "ServiceAccount", Namespace: ctx.InstallNamespace, Name: saName}),
 					WithRoleRef(rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: name}),
 				),
 			)
 		}
 	}
-	return objs, nil
+	ctx.Objects = append(ctx.Objects, objs...)
+	return nil
 }
 
 // BundleCSVClusterPermissionsGenerator generates ClusterRoles and ClusterRoleBindings based on the bundle's
@@ -159,16 +156,13 @@ func BundleCSVPermissionsGenerator(rv1 *bundle.RegistryV1, opts render.Options) 
 //     (and shouldn't have requested) in single-namespace mode.
 //   - So OLM automatically appends get/list/watch on namespaces during the lift, bridging the gap
 //     without requiring the operator author to over-request permissions upfront.
-func BundleCSVClusterPermissionsGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-	if rv1 == nil {
-		return nil, fmt.Errorf("bundle cannot be nil")
-	}
-	clusterPermissions := rv1.CSV.Spec.InstallStrategy.StrategySpec.ClusterPermissions
+func BundleCSVClusterPermissionsGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+	clusterPermissions := slices.Clone(rv1.CSV.Spec.InstallStrategy.StrategySpec.ClusterPermissions)
 
 	// If we're in AllNamespaces mode, promote the permissions to clusterPermissions
 	if len(opts.TargetNamespaces) == 1 && opts.TargetNamespaces[0] == "" {
 		for _, p := range rv1.CSV.Spec.InstallStrategy.StrategySpec.Permissions {
-			p.Rules = append(p.Rules, rbacv1.PolicyRule{
+			p.Rules = append(slices.Clone(p.Rules), rbacv1.PolicyRule{
 				Verbs:     []string{"get", "list", "watch"},
 				APIGroups: []string{corev1.GroupName},
 				Resources: []string{"namespaces"},
@@ -185,12 +179,13 @@ func BundleCSVClusterPermissionsGenerator(rv1 *bundle.RegistryV1, opts render.Op
 			CreateClusterRoleResource(name, WithRules(permission.Rules...)),
 			CreateClusterRoleBindingResource(
 				name,
-				WithSubjects(rbacv1.Subject{Kind: "ServiceAccount", Namespace: opts.InstallNamespace, Name: saName}),
+				WithSubjects(rbacv1.Subject{Kind: "ServiceAccount", Namespace: ctx.InstallNamespace, Name: saName}),
 				WithRoleRef(rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: name}),
 			),
 		)
 	}
-	return objs, nil
+	ctx.Objects = append(ctx.Objects, objs...)
+	return nil
 }
 
 // BundleCSVServiceAccountGenerator generates ServiceAccount resources based on the bundle's cluster service version
@@ -198,10 +193,7 @@ func BundleCSVClusterPermissionsGenerator(rv1 *bundle.RegistryV1, opts render.Op
 // if multiple permissions reference the same service account, only one resource will be generated).
 // If a clusterPermission, or permission, references an empty (”) service account, this is considered to be the
 // namespace 'default' service account. A resource for the namespace 'default' service account is not generated.
-func BundleCSVServiceAccountGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-	if rv1 == nil {
-		return nil, fmt.Errorf("bundle cannot be nil")
-	}
+func BundleCSVServiceAccountGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 	allPermissions := append(
 		rv1.CSV.Spec.InstallStrategy.StrategySpec.Permissions,
 		rv1.CSV.Spec.InstallStrategy.StrategySpec.ClusterPermissions...,
@@ -216,19 +208,17 @@ func BundleCSVServiceAccountGenerator(rv1 *bundle.RegistryV1, opts render.Option
 	for _, serviceAccountName := range serviceAccountNames.UnsortedList() {
 		// no need to generate the default service account
 		if serviceAccountName != "default" {
-			objs = append(objs, CreateServiceAccountResource(serviceAccountName, opts.InstallNamespace))
+			objs = append(objs, CreateServiceAccountResource(serviceAccountName, ctx.InstallNamespace))
 		}
 	}
-	return objs, nil
+	ctx.Objects = append(ctx.Objects, objs...)
+	return nil
 }
 
 // BundleCRDGenerator generates CustomResourceDefinition resources from the registry+v1 bundle. If the CRD is referenced
 // by any conversion webhook defined in the bundle's cluster service version spec, the CRD is modified
 // by the CertificateProvider in opts to add any annotations or modifications necessary for certificate injection.
-func BundleCRDGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-	if rv1 == nil {
-		return nil, fmt.Errorf("bundle cannot be nil")
-	}
+func BundleCRDGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 
 	// collect deployments to crds with conversion webhooks
 	crdToDeploymentMap := map[string]v1alpha1.WebhookDescription{}
@@ -238,7 +228,7 @@ func BundleCRDGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.O
 		}
 		for _, crdName := range wh.ConversionCRDs {
 			if _, ok := crdToDeploymentMap[crdName]; ok {
-				return nil, fmt.Errorf("custom resource definition '%s' is referenced by multiple conversion webhook definitions", crdName)
+				return fmt.Errorf("custom resource definition '%s' is referenced by multiple conversion webhook definitions", crdName)
 			}
 			crdToDeploymentMap[crdName] = wh
 		}
@@ -251,7 +241,7 @@ func BundleCRDGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.O
 			// OLMv0 behaviour parity
 			// See https://github.com/operator-framework/operator-lifecycle-manager/blob/dfd0b2bea85038d3c0d65348bc812d297f16b8d2/pkg/controller/install/webhook.go#L232
 			if crd.Spec.PreserveUnknownFields {
-				return nil, fmt.Errorf("custom resource definition '%s' must have .spec.preserveUnknownFields set to false to let API Server call webhook to do the conversion", crd.Name)
+				return fmt.Errorf("custom resource definition '%s' must have .spec.preserveUnknownFields set to false to let API Server call webhook to do the conversion", crd.Name)
 			}
 
 			// OLMv0 behaviour parity
@@ -261,13 +251,13 @@ func BundleCRDGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.O
 				conversionWebhookPath = *cw.WebhookPath
 			}
 
-			certProvisioner := render.CertProvisionerFor(cw.DeploymentName, opts)
+			certProvisioner := render.CertProvisionerFor(types.NamespacedName{Name: cw.DeploymentName, Namespace: ctx.InstallNamespace}, opts)
 			cp.Spec.Conversion = &apiextensionsv1.CustomResourceConversion{
 				Strategy: apiextensionsv1.WebhookConverter,
 				Webhook: &apiextensionsv1.WebhookConversion{
 					ClientConfig: &apiextensionsv1.WebhookClientConfig{
 						Service: &apiextensionsv1.ServiceReference{
-							Namespace: opts.InstallNamespace,
+							Namespace: ctx.InstallNamespace,
 							Name:      certProvisioner.ServiceName,
 							Path:      &conversionWebhookPath,
 							Port:      &cw.ContainerPort,
@@ -278,44 +268,40 @@ func BundleCRDGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.O
 			}
 
 			if err := certProvisioner.InjectCABundle(cp); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		objs = append(objs, cp)
 	}
-	return objs, nil
+	ctx.Objects = append(ctx.Objects, objs...)
+	return nil
 }
 
 // BundleAdditionalResourcesGenerator generates resources for the additional resources included in the
-// bundle. If the bundle resource is namespace scoped, its namespace will be set to the value of opts.InstallNamespace.
-func BundleAdditionalResourcesGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-	if rv1 == nil {
-		return nil, fmt.Errorf("bundle cannot be nil")
-	}
+// bundle. If the bundle resource is namespace scoped, its namespace will be set to the resolved install namespace.
+func BundleAdditionalResourcesGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 	objs := make([]client.Object, 0, len(rv1.Others))
 	for _, res := range rv1.Others {
 		supported, namespaced := registrybundle.IsSupported(res.GetKind())
 		if !supported {
-			return nil, fmt.Errorf("bundle contains unsupported resource: Name: %v, Kind: %v", res.GetName(), res.GetKind())
+			return fmt.Errorf("bundle contains unsupported resource: Name: %v, Kind: %v", res.GetName(), res.GetKind())
 		}
 
 		obj := res.DeepCopy()
 		if namespaced {
-			obj.SetNamespace(opts.InstallNamespace)
+			obj.SetNamespace(ctx.InstallNamespace)
 		}
 
 		objs = append(objs, obj)
 	}
-	return objs, nil
+	ctx.Objects = append(ctx.Objects, objs...)
+	return nil
 }
 
 // BundleValidatingWebhookResourceGenerator generates ValidatingAdmissionWebhookConfiguration resources based on
 // the bundle's cluster service version spec. The resource is modified by the CertificateProvider in opts
 // to add any annotations or modifications necessary for certificate injection.
-func BundleValidatingWebhookResourceGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-	if rv1 == nil {
-		return nil, fmt.Errorf("bundle cannot be nil")
-	}
+func BundleValidatingWebhookResourceGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 
 	//nolint:prealloc
 	var objs []client.Object
@@ -324,11 +310,11 @@ func BundleValidatingWebhookResourceGenerator(rv1 *bundle.RegistryV1, opts rende
 		if wh.Type != v1alpha1.ValidatingAdmissionWebhook {
 			continue
 		}
-		certProvisioner := render.CertProvisionerFor(wh.DeploymentName, opts)
+		certProvisioner := render.CertProvisionerFor(types.NamespacedName{Name: wh.DeploymentName, Namespace: ctx.InstallNamespace}, opts)
 		webhookName := strings.TrimSuffix(wh.GenerateName, "-")
 		webhookResource := CreateValidatingWebhookConfigurationResource(
 			webhookName,
-			opts.InstallNamespace,
+			ctx.InstallNamespace,
 			WithValidatingWebhooks(
 				admissionregistrationv1.ValidatingWebhook{
 					Name:                    webhookName,
@@ -341,7 +327,7 @@ func BundleValidatingWebhookResourceGenerator(rv1 *bundle.RegistryV1, opts rende
 					AdmissionReviewVersions: wh.AdmissionReviewVersions,
 					ClientConfig: admissionregistrationv1.WebhookClientConfig{
 						Service: &admissionregistrationv1.ServiceReference{
-							Namespace: opts.InstallNamespace,
+							Namespace: ctx.InstallNamespace,
 							Name:      certProvisioner.ServiceName,
 							Path:      wh.WebhookPath,
 							Port:      &wh.ContainerPort,
@@ -354,20 +340,18 @@ func BundleValidatingWebhookResourceGenerator(rv1 *bundle.RegistryV1, opts rende
 			),
 		)
 		if err := certProvisioner.InjectCABundle(webhookResource); err != nil {
-			return nil, err
+			return err
 		}
 		objs = append(objs, webhookResource)
 	}
-	return objs, nil
+	ctx.Objects = append(ctx.Objects, objs...)
+	return nil
 }
 
 // BundleMutatingWebhookResourceGenerator generates MutatingAdmissionWebhookConfiguration resources based on
 // the bundle's cluster service version spec. The resource is modified by the CertificateProvider in opts
 // to add any annotations or modifications necessary for certificate injection.
-func BundleMutatingWebhookResourceGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-	if rv1 == nil {
-		return nil, fmt.Errorf("bundle cannot be nil")
-	}
+func BundleMutatingWebhookResourceGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 
 	//nolint:prealloc
 	var objs []client.Object
@@ -375,11 +359,11 @@ func BundleMutatingWebhookResourceGenerator(rv1 *bundle.RegistryV1, opts render.
 		if wh.Type != v1alpha1.MutatingAdmissionWebhook {
 			continue
 		}
-		certProvisioner := render.CertProvisionerFor(wh.DeploymentName, opts)
+		certProvisioner := render.CertProvisionerFor(types.NamespacedName{Name: wh.DeploymentName, Namespace: ctx.InstallNamespace}, opts)
 		webhookName := strings.TrimSuffix(wh.GenerateName, "-")
 		webhookResource := CreateMutatingWebhookConfigurationResource(
 			webhookName,
-			opts.InstallNamespace,
+			ctx.InstallNamespace,
 			WithMutatingWebhooks(
 				admissionregistrationv1.MutatingWebhook{
 					Name:                    webhookName,
@@ -392,7 +376,7 @@ func BundleMutatingWebhookResourceGenerator(rv1 *bundle.RegistryV1, opts render.
 					AdmissionReviewVersions: wh.AdmissionReviewVersions,
 					ClientConfig: admissionregistrationv1.WebhookClientConfig{
 						Service: &admissionregistrationv1.ServiceReference{
-							Namespace: opts.InstallNamespace,
+							Namespace: ctx.InstallNamespace,
 							Name:      certProvisioner.ServiceName,
 							Path:      wh.WebhookPath,
 							Port:      &wh.ContainerPort,
@@ -406,20 +390,18 @@ func BundleMutatingWebhookResourceGenerator(rv1 *bundle.RegistryV1, opts render.
 			),
 		)
 		if err := certProvisioner.InjectCABundle(webhookResource); err != nil {
-			return nil, err
+			return err
 		}
 		objs = append(objs, webhookResource)
 	}
-	return objs, nil
+	ctx.Objects = append(ctx.Objects, objs...)
+	return nil
 }
 
 // BundleDeploymentServiceResourceGenerator generates Service resources that support, e.g. the webhooks,
 // defined in the bundle's cluster service version spec. The resource is modified by the CertificateProvider in opts
 // to add any annotations or modifications necessary for certificate injection.
-func BundleDeploymentServiceResourceGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-	if rv1 == nil {
-		return nil, fmt.Errorf("bundle cannot be nil")
-	}
+func BundleDeploymentServiceResourceGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 
 	// collect webhook service ports
 	webhookServicePortsByDeployment := map[string]sets.Set[corev1.ServicePort]{}
@@ -447,10 +429,10 @@ func BundleDeploymentServiceResourceGenerator(rv1 *bundle.RegistryV1, opts rende
 			labelSelector = deploymentSpec.Spec.Selector.MatchLabels
 		}
 
-		certProvisioner := render.CertProvisionerFor(deploymentSpec.Name, opts)
+		certProvisioner := render.CertProvisionerFor(types.NamespacedName{Name: deploymentSpec.Name, Namespace: ctx.InstallNamespace}, opts)
 		serviceResource := CreateServiceResource(
 			certProvisioner.ServiceName,
-			opts.InstallNamespace,
+			ctx.InstallNamespace,
 			WithServiceSpec(
 				corev1.ServiceSpec{
 					Ports:    ports,
@@ -460,17 +442,18 @@ func BundleDeploymentServiceResourceGenerator(rv1 *bundle.RegistryV1, opts rende
 		)
 
 		if err := certProvisioner.InjectCABundle(serviceResource); err != nil {
-			return nil, err
+			return err
 		}
 		objs = append(objs, serviceResource)
 	}
 
-	return objs, nil
+	ctx.Objects = append(ctx.Objects, objs...)
+	return nil
 }
 
 // CertProviderResourceGenerator generates any resources necessary for the CertificateProvider
 // in opts to function correctly, e.g. Issuer or Certificate resources.
-func CertProviderResourceGenerator(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
+func CertProviderResourceGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
 	deploymentsWithWebhooks := sets.Set[string]{}
 
 	for _, wh := range rv1.CSV.Spec.WebhookDefinitions {
@@ -479,16 +462,17 @@ func CertProviderResourceGenerator(rv1 *bundle.RegistryV1, opts render.Options) 
 
 	var objs []client.Object
 	for _, depName := range deploymentsWithWebhooks.UnsortedList() {
-		certCfg := render.CertProvisionerFor(depName, opts)
+		certCfg := render.CertProvisionerFor(types.NamespacedName{Name: depName, Namespace: ctx.InstallNamespace}, opts)
 		certObjs, err := certCfg.AdditionalObjects()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for _, certObj := range certObjs {
 			objs = append(objs, &certObj)
 		}
 	}
-	return objs, nil
+	ctx.Objects = append(ctx.Objects, objs...)
+	return nil
 }
 
 func saNameOrDefault(saName string) string {

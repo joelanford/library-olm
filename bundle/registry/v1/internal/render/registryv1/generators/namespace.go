@@ -1,14 +1,18 @@
-package render
+package generators
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/yaml"
 
 	"github.com/joelanford/library-olm/bundle/registry/v1/internal/bundle"
+	"github.com/joelanford/library-olm/bundle/registry/v1/internal/render"
 )
 
 const (
@@ -23,6 +27,67 @@ const (
 	// absent.
 	annotationSuggestedNamespace = "operatorframework.io/suggested-namespace"
 )
+
+// BundleNamespaceGenerator resolves the install namespace before resource generation.
+func BundleNamespaceGenerator(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+	ns, emit, err := resolveInstallNamespace(&rv1, opts.SelfManagedInstallNamespace)
+	if err != nil {
+		return err
+	}
+	if err := validateTargetNamespaces(&rv1, ns.Name, opts.TargetNamespaces); err != nil {
+		return fmt.Errorf("invalid option(s): invalid target namespaces %v: %w", opts.TargetNamespaces, err)
+	}
+
+	ctx.InstallNamespace = ns.Name
+	if emit {
+		ctx.Objects = append(ctx.Objects, &ns)
+	}
+	return nil
+}
+
+func validateTargetNamespaces(rv1 *bundle.RegistryV1, installNamespace string, targetNamespaces []string) error {
+	supportedInstallModes := bundle.SupportedInstallModes(*rv1)
+
+	set := sets.New[string](targetNamespaces...)
+	switch {
+	case set.Len() == 0:
+		// Note: this function generally expects targetNamespace to contain at least one value set by default
+		// in case the user does not specify the value. The option to set the targetNamespace is a no-op if it is empty.
+		// The only case for which a default targetNamespace is undefined is in the case of a bundle that only
+		// supports SingleNamespace install mode. The if statement here is added to provide a more friendly error
+		// message than just the generic (at least one target namespace must be specified) which would occur
+		// in case only the MultiNamespace install mode is supported by the bundle.
+		// If AllNamespaces mode is supported, the default will be [""] -> watch all namespaces
+		// If only OwnNamespace is supported, the default will be [install-namespace] -> only watch the install/own namespace
+		if supportedInstallModes.Has(v1alpha1.InstallModeTypeMultiNamespace) {
+			return errors.New("at least one target namespace must be specified")
+		}
+		return errors.New("exactly one target namespace must be specified")
+	case set.Len() == 1 && set.Has(""):
+		if supportedInstallModes.Has(v1alpha1.InstallModeTypeAllNamespaces) {
+			return nil
+		}
+		return fmt.Errorf("supported install modes %v do not support targeting all namespaces", sets.List(supportedInstallModes))
+	case set.Len() == 1 && !set.Has(""):
+		if targetNamespaces[0] == installNamespace {
+			if !supportedInstallModes.Has(v1alpha1.InstallModeTypeOwnNamespace) {
+				return fmt.Errorf("supported install modes %v do not support targeting own namespace", sets.List(supportedInstallModes))
+			}
+			return nil
+		}
+		if supportedInstallModes.Has(v1alpha1.InstallModeTypeSingleNamespace) {
+			return nil
+		}
+	default:
+		if !supportedInstallModes.Has(v1alpha1.InstallModeTypeOwnNamespace) && set.Has(installNamespace) {
+			return fmt.Errorf("supported install modes %v do not support targeting own namespace", sets.List(supportedInstallModes))
+		}
+		if supportedInstallModes.Has(v1alpha1.InstallModeTypeMultiNamespace) && !set.Has("") {
+			return nil
+		}
+	}
+	return fmt.Errorf("supported install modes %v do not support target namespaces %v", sets.List[v1alpha1.InstallModeType](supportedInstallModes), targetNamespaces)
+}
 
 // resolveInstallNamespace determines the install namespace for a bundle render.
 // It returns the resolved Namespace (whose Name is the install namespace) and
@@ -48,7 +113,6 @@ func resolveInstallNamespace(rv1 *bundle.RegistryV1, selfManaged *string) (names
 		}
 		return *newNamespace(*selfManaged), false, nil
 	}
-
 	ns, err := deriveNamespace(rv1)
 	if err != nil {
 		return corev1.Namespace{}, false, err
@@ -64,7 +128,6 @@ func resolveInstallNamespace(rv1 *bundle.RegistryV1, selfManaged *string) (names
 // resulting name.
 func deriveNamespace(rv1 *bundle.RegistryV1) (*corev1.Namespace, error) {
 	annotations := rv1.CSV.GetAnnotations()
-
 	if tmpl, ok := annotations[annotationSuggestedNamespaceTemplate]; ok {
 		ns := &corev1.Namespace{}
 		if err := yaml.Unmarshal([]byte(tmpl), ns); err != nil {
@@ -72,11 +135,9 @@ func deriveNamespace(rv1 *bundle.RegistryV1) (*corev1.Namespace, error) {
 		}
 		return withNamespaceTypeMeta(ns), nil
 	}
-
 	if name, ok := annotations[annotationSuggestedNamespace]; ok {
 		return newNamespace(name), nil
 	}
-
 	return newNamespace(fmt.Sprintf("%s-system", rv1.PackageName)), nil
 }
 

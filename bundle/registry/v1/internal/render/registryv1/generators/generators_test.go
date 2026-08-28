@@ -30,31 +30,36 @@ import (
 
 func Test_ResourceGenerators(t *testing.T) {
 	g := render.ResourceGenerators{
-		func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-			return []client.Object{&corev1.Service{}}, nil
+		func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+			ctx.Objects = append(ctx.Objects, &corev1.Service{})
+			return nil
 		},
-		func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-			return []client.Object{&corev1.ConfigMap{}}, nil
+		func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+			ctx.Objects = append(ctx.Objects, &corev1.ConfigMap{})
+			return nil
 		},
 	}
 
-	objs, err := g.GenerateResources(&bundle.RegistryV1{}, render.Options{})
+	ctx := &render.GeneratorContext{}
+	err := g.GenerateResources(bundle.RegistryV1{}, render.Options{}, ctx)
 	require.NoError(t, err)
-	require.Equal(t, []client.Object{&corev1.Service{}, &corev1.ConfigMap{}}, objs)
+	require.Equal(t, []client.Object{&corev1.Service{}, &corev1.ConfigMap{}}, ctx.Objects)
 }
 
 func Test_ResourceGenerators_Errors(t *testing.T) {
 	g := render.ResourceGenerators{
-		func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-			return []client.Object{&corev1.Service{}}, nil
+		func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+			ctx.Objects = append(ctx.Objects, &corev1.Service{})
+			return nil
 		},
-		func(rv1 *bundle.RegistryV1, opts render.Options) ([]client.Object, error) {
-			return nil, fmt.Errorf("generator error")
+		func(rv1 bundle.RegistryV1, opts render.Options, ctx *render.GeneratorContext) error {
+			return fmt.Errorf("generator error")
 		},
 	}
 
-	objs, err := g.GenerateResources(&bundle.RegistryV1{}, render.Options{})
-	require.Nil(t, objs)
+	ctx := &render.GeneratorContext{}
+	err := g.GenerateResources(bundle.RegistryV1{}, render.Options{}, ctx)
+	require.Len(t, ctx.Objects, 1)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "generator error")
 }
@@ -64,6 +69,7 @@ func Test_BundleCSVDeploymentGenerator_Succeeds(t *testing.T) {
 		name              string
 		bundle            *bundle.RegistryV1
 		opts              render.Options
+		genCtx            *render.GeneratorContext
 		expectedResources []client.Object
 	}{
 		{
@@ -99,9 +105,9 @@ func Test_BundleCSVDeploymentGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{"watch-namespace-one", "watch-namespace-two"},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&appsv1.Deployment{
 					TypeMeta: metav1.TypeMeta{
@@ -158,9 +164,9 @@ func Test_BundleCSVDeploymentGenerator_Succeeds(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			objs, err := generators.BundleCSVDeploymentGenerator(tc.bundle, tc.opts)
+			err := generators.BundleCSVDeploymentGenerator(*tc.bundle, tc.opts, tc.genCtx)
 			require.NoError(t, err)
-			require.Equal(t, tc.expectedResources, objs)
+			require.Equal(t, tc.expectedResources, tc.genCtx.Objects)
 		})
 	}
 }
@@ -258,14 +264,14 @@ func Test_BundleCSVDeploymentGenerator_WithCertWithCertProvider_Succeeds(t *test
 			).Build(),
 	}
 
-	objs, err := generators.BundleCSVDeploymentGenerator(b, render.Options{
-		InstallNamespace:    "install-namespace",
+	ctx := &render.GeneratorContext{InstallNamespace: "install-namespace"}
+	err := generators.BundleCSVDeploymentGenerator(*b, render.Options{
 		CertificateProvider: fakeProvider,
-	})
+	}, ctx)
 	require.NoError(t, err)
-	require.Len(t, objs, 1)
+	require.Len(t, ctx.Objects, 1)
 
-	deployment := objs[0].(*appsv1.Deployment)
+	deployment := ctx.Objects[0].(*appsv1.Deployment)
 	require.NotNil(t, deployment)
 
 	require.Equal(t, []corev1.Volume{
@@ -346,13 +352,6 @@ func Test_BundleCSVDeploymentGenerator_WithCertWithCertProvider_Succeeds(t *test
 	}, deployment.Spec.Template.Spec.Containers)
 }
 
-func Test_BundleCSVDeploymentGenerator_FailsOnNil(t *testing.T) {
-	objs, err := generators.BundleCSVDeploymentGenerator(nil, render.Options{})
-	require.Nil(t, objs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bundle cannot be nil")
-}
-
 func Test_BundleCSVPermissionsGenerator_Succeeds(t *testing.T) {
 	fakeUniqueNameGenerator := func(base string, _ interface{}) string {
 		return base
@@ -362,15 +361,16 @@ func Test_BundleCSVPermissionsGenerator_Succeeds(t *testing.T) {
 		name              string
 		opts              render.Options
 		bundle            *bundle.RegistryV1
+		genCtx            *render.GeneratorContext
 		expectedResources []client.Object
 	}{
 		{
 			name: "does not generate any resources when in AllNamespaces mode (target namespace is [''])",
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{""},
 				UniqueNameGenerator: fakeUniqueNameGenerator,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
 					WithName("csv").
@@ -392,10 +392,10 @@ func Test_BundleCSVPermissionsGenerator_Succeeds(t *testing.T) {
 		{
 			name: "generates role and rolebinding for permission service-account when in Single/OwnNamespace mode (target namespace contains a single namespace)",
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{"watch-namespace"},
 				UniqueNameGenerator: fakeUniqueNameGenerator,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
 					WithName("csv").
@@ -466,10 +466,10 @@ func Test_BundleCSVPermissionsGenerator_Succeeds(t *testing.T) {
 		{
 			name: "generates role and rolebinding for permission service-account for each target namespace when in MultiNamespace install mode (target namespace contains multiple namespaces)",
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{"watch-namespace", "watch-namespace-two"},
 				UniqueNameGenerator: fakeUniqueNameGenerator,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
 					WithName("csv").
@@ -584,10 +584,10 @@ func Test_BundleCSVPermissionsGenerator_Succeeds(t *testing.T) {
 		{
 			name: "generates role and rolebinding for each permission service-account",
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{"watch-namespace"},
 				UniqueNameGenerator: fakeUniqueNameGenerator,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
 					WithName("csv").
@@ -700,10 +700,10 @@ func Test_BundleCSVPermissionsGenerator_Succeeds(t *testing.T) {
 		{
 			name: "treats empty service account as 'default' service account",
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{"watch-namespace"},
 				UniqueNameGenerator: fakeUniqueNameGenerator,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
 					WithName("csv").
@@ -765,21 +765,14 @@ func Test_BundleCSVPermissionsGenerator_Succeeds(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			objs, err := generators.BundleCSVPermissionsGenerator(tc.bundle, tc.opts)
+			err := generators.BundleCSVPermissionsGenerator(*tc.bundle, tc.opts, tc.genCtx)
 			require.NoError(t, err)
-			for i := range objs {
-				require.Equal(t, tc.expectedResources[i], objs[i], "failed to find expected resource at index %d", i)
+			for i := range tc.genCtx.Objects {
+				require.Equal(t, tc.expectedResources[i], tc.genCtx.Objects[i], "failed to find expected resource at index %d", i)
 			}
-			require.Len(t, objs, len(tc.expectedResources))
+			require.Len(t, tc.genCtx.Objects, len(tc.expectedResources))
 		})
 	}
-}
-
-func Test_BundleCSVPermissionGenerator_FailsOnNil(t *testing.T) {
-	objs, err := generators.BundleCSVPermissionsGenerator(nil, render.Options{})
-	require.Nil(t, objs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bundle cannot be nil")
 }
 
 func Test_BundleCSVClusterPermissionsGenerator_Succeeds(t *testing.T) {
@@ -791,15 +784,16 @@ func Test_BundleCSVClusterPermissionsGenerator_Succeeds(t *testing.T) {
 		name              string
 		opts              render.Options
 		bundle            *bundle.RegistryV1
+		genCtx            *render.GeneratorContext
 		expectedResources []client.Object
 	}{
 		{
 			name: "promotes permissions to clusters permissions and adds namespace policy rule when in AllNamespaces mode (target namespace is [''])",
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{""},
 				UniqueNameGenerator: fakeUniqueNameGenerator,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
 					WithName("csv").
@@ -916,10 +910,10 @@ func Test_BundleCSVClusterPermissionsGenerator_Succeeds(t *testing.T) {
 		{
 			name: "generates clusterroles and clusterrolebindings for clusterpermissions",
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{"watch-namespace"},
 				UniqueNameGenerator: fakeUniqueNameGenerator,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
 					WithName("csv").
@@ -1028,10 +1022,10 @@ func Test_BundleCSVClusterPermissionsGenerator_Succeeds(t *testing.T) {
 		{
 			name: "treats empty service accounts as 'default' service account",
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{"watch-namespace"},
 				UniqueNameGenerator: fakeUniqueNameGenerator,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
 					WithName("csv").
@@ -1091,21 +1085,14 @@ func Test_BundleCSVClusterPermissionsGenerator_Succeeds(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			objs, err := generators.BundleCSVClusterPermissionsGenerator(tc.bundle, tc.opts)
+			err := generators.BundleCSVClusterPermissionsGenerator(*tc.bundle, tc.opts, tc.genCtx)
 			require.NoError(t, err)
-			for i := range objs {
-				require.Equal(t, tc.expectedResources[i], objs[i], "failed to find expected resource at index %d", i)
+			for i := range tc.genCtx.Objects {
+				require.Equal(t, tc.expectedResources[i], tc.genCtx.Objects[i], "failed to find expected resource at index %d", i)
 			}
-			require.Len(t, objs, len(tc.expectedResources))
+			require.Len(t, tc.genCtx.Objects, len(tc.expectedResources))
 		})
 	}
-}
-
-func Test_BundleCSVClusterPermissionGenerator_FailsOnNil(t *testing.T) {
-	objs, err := generators.BundleCSVClusterPermissionsGenerator(nil, render.Options{})
-	require.Nil(t, objs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bundle cannot be nil")
 }
 
 func Test_BundleCSVServiceAccountGenerator_Succeeds(t *testing.T) {
@@ -1113,13 +1100,13 @@ func Test_BundleCSVServiceAccountGenerator_Succeeds(t *testing.T) {
 		name              string
 		opts              render.Options
 		bundle            *bundle.RegistryV1
+		genCtx            *render.GeneratorContext
 		expectedResources []client.Object
 	}{
 		{
-			name: "generates unique set of clusterpermissions and permissions service accounts in the install namespace",
-			opts: render.Options{
-				InstallNamespace: "install-namespace",
-			},
+			name:   "generates unique set of clusterpermissions and permissions service accounts in the install namespace",
+			opts:   render.Options{},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
 					WithName("csv").
@@ -1202,10 +1189,9 @@ func Test_BundleCSVServiceAccountGenerator_Succeeds(t *testing.T) {
 			},
 		},
 		{
-			name: "treats empty service accounts as default and doesn't generate them",
-			opts: render.Options{
-				InstallNamespace: "install-namespace",
-			},
+			name:   "treats empty service accounts as default and doesn't generate them",
+			opts:   render.Options{},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			bundle: &bundle.RegistryV1{
 				CSV: clusterserviceversion.Builder().
 					WithName("csv").
@@ -1238,29 +1224,21 @@ func Test_BundleCSVServiceAccountGenerator_Succeeds(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			objs, err := generators.BundleCSVServiceAccountGenerator(tc.bundle, tc.opts)
+			err := generators.BundleCSVServiceAccountGenerator(*tc.bundle, tc.opts, tc.genCtx)
 			require.NoError(t, err)
-			slices.SortFunc(objs, func(a, b client.Object) int {
+			slices.SortFunc(tc.genCtx.Objects, func(a, b client.Object) int {
 				return cmp.Compare(a.GetName(), b.GetName())
 			})
-			for i := range objs {
-				require.Equal(t, tc.expectedResources[i], objs[i], "failed to find expected resource at index %d", i)
+			for i := range tc.genCtx.Objects {
+				require.Equal(t, tc.expectedResources[i], tc.genCtx.Objects[i], "failed to find expected resource at index %d", i)
 			}
-			require.Len(t, objs, len(tc.expectedResources))
+			require.Len(t, tc.genCtx.Objects, len(tc.expectedResources))
 		})
 	}
 }
 
-func Test_BundleCSVServiceAccountGenerator_FailsOnNil(t *testing.T) {
-	objs, err := generators.BundleCSVServiceAccountGenerator(nil, render.Options{})
-	require.Nil(t, objs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bundle cannot be nil")
-}
-
 func Test_BundleCRDGenerator_Succeeds(t *testing.T) {
 	opts := render.Options{
-		InstallNamespace: "install-namespace",
 		TargetNamespaces: []string{""},
 	}
 
@@ -1271,17 +1249,17 @@ func Test_BundleCRDGenerator_Succeeds(t *testing.T) {
 		},
 	}
 
-	objs, err := generators.BundleCRDGenerator(bundle, opts)
+	ctx := &render.GeneratorContext{InstallNamespace: "install-namespace"}
+	err := generators.BundleCRDGenerator(*bundle, opts, ctx)
 	require.NoError(t, err)
 	require.Equal(t, []client.Object{
 		&apiextensionsv1.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: "crd-one"}},
 		&apiextensionsv1.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: "crd-two"}},
-	}, objs)
+	}, ctx.Objects)
 }
 
 func Test_BundleCRDGenerator_WithConversionWebhook_Succeeds(t *testing.T) {
 	opts := render.Options{
-		InstallNamespace: "install-namespace",
 		TargetNamespaces: []string{""},
 	}
 
@@ -1311,7 +1289,8 @@ func Test_BundleCRDGenerator_WithConversionWebhook_Succeeds(t *testing.T) {
 			).Build(),
 	}
 
-	objs, err := generators.BundleCRDGenerator(bundle, opts)
+	ctx := &render.GeneratorContext{InstallNamespace: "install-namespace"}
+	err := generators.BundleCRDGenerator(*bundle, opts, ctx)
 	require.NoError(t, err)
 	require.Equal(t, []client.Object{
 		&apiextensionsv1.CustomResourceDefinition{
@@ -1356,12 +1335,11 @@ func Test_BundleCRDGenerator_WithConversionWebhook_Succeeds(t *testing.T) {
 				},
 			},
 		},
-	}, objs)
+	}, ctx.Objects)
 }
 
 func Test_BundleCRDGenerator_WithConversionWebhook_Fails(t *testing.T) {
 	opts := render.Options{
-		InstallNamespace: "install-namespace",
 		TargetNamespaces: []string{""},
 	}
 
@@ -1387,8 +1365,9 @@ func Test_BundleCRDGenerator_WithConversionWebhook_Fails(t *testing.T) {
 			).Build(),
 	}
 
-	objs, err := generators.BundleCRDGenerator(bundle, opts)
-	require.Nil(t, objs)
+	ctx := &render.GeneratorContext{InstallNamespace: "install-namespace"}
+	err := generators.BundleCRDGenerator(*bundle, opts, ctx)
+	require.Empty(t, ctx.Objects)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "must have .spec.preserveUnknownFields set to false to let API Server call webhook to do the conversion")
 }
@@ -1404,7 +1383,6 @@ func Test_BundleCRDGenerator_WithCertProvider_Succeeds(t *testing.T) {
 	}
 
 	opts := render.Options{
-		InstallNamespace:    "install-namespace",
 		TargetNamespaces:    []string{""},
 		CertificateProvider: fakeProvider,
 	}
@@ -1426,25 +1404,17 @@ func Test_BundleCRDGenerator_WithCertProvider_Succeeds(t *testing.T) {
 			).Build(),
 	}
 
-	objs, err := generators.BundleCRDGenerator(bundle, opts)
+	ctx := &render.GeneratorContext{InstallNamespace: "install-namespace"}
+	err := generators.BundleCRDGenerator(*bundle, opts, ctx)
 	require.NoError(t, err)
-	require.Len(t, objs, 2)
+	require.Len(t, ctx.Objects, 2)
 	require.Equal(t, map[string]string{
 		"cert-provider": "annotation",
-	}, objs[0].GetAnnotations())
-}
-
-func Test_BundleCRDGenerator_FailsOnNil(t *testing.T) {
-	objs, err := generators.BundleCRDGenerator(nil, render.Options{})
-	require.Nil(t, objs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bundle cannot be nil")
+	}, ctx.Objects[0].GetAnnotations())
 }
 
 func Test_BundleAdditionalResourcesGenerator_Succeeds(t *testing.T) {
-	opts := render.Options{
-		InstallNamespace: "install-namespace",
-	}
+	opts := render.Options{}
 
 	bundle := &bundle.RegistryV1{
 		Others: []unstructured.Unstructured{
@@ -1473,16 +1443,10 @@ func Test_BundleAdditionalResourcesGenerator_Succeeds(t *testing.T) {
 		},
 	}
 
-	objs, err := generators.BundleAdditionalResourcesGenerator(bundle, opts)
+	ctx := &render.GeneratorContext{InstallNamespace: "install-namespace"}
+	err := generators.BundleAdditionalResourcesGenerator(*bundle, opts, ctx)
 	require.NoError(t, err)
-	require.Len(t, objs, 2)
-}
-
-func Test_BundleAdditionalResourcesGenerator_FailsOnNil(t *testing.T) {
-	objs, err := generators.BundleAdditionalResourcesGenerator(nil, render.Options{})
-	require.Nil(t, objs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bundle cannot be nil")
+	require.Len(t, ctx.Objects, 2)
 }
 
 func Test_BundleValidatingWebhookResourceGenerator_Succeeds(t *testing.T) {
@@ -1498,6 +1462,7 @@ func Test_BundleValidatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 		name              string
 		bundle            *bundle.RegistryV1
 		opts              render.Options
+		genCtx            *render.GeneratorContext
 		expectedResources []client.Object
 	}{
 		{
@@ -1539,9 +1504,9 @@ func Test_BundleValidatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{""},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&admissionregistrationv1.ValidatingWebhookConfiguration{
 					TypeMeta: metav1.TypeMeta{
@@ -1632,9 +1597,9 @@ func Test_BundleValidatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{"watch-namespace-one", "watch-namespace-two"},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&admissionregistrationv1.ValidatingWebhookConfiguration{
 					TypeMeta: metav1.TypeMeta{
@@ -1708,10 +1673,10 @@ func Test_BundleValidatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{"watch-namespace-one", "watch-namespace-two"},
 				CertificateProvider: fakeProvider,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&admissionregistrationv1.ValidatingWebhookConfiguration{
 					TypeMeta: metav1.TypeMeta{
@@ -1751,18 +1716,11 @@ func Test_BundleValidatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			objs, err := generators.BundleValidatingWebhookResourceGenerator(tc.bundle, tc.opts)
+			err := generators.BundleValidatingWebhookResourceGenerator(*tc.bundle, tc.opts, tc.genCtx)
 			require.NoError(t, err)
-			require.Equal(t, tc.expectedResources, objs)
+			require.Equal(t, tc.expectedResources, tc.genCtx.Objects)
 		})
 	}
-}
-
-func Test_BundleValidatingWebhookResourceGenerator_FailsOnNil(t *testing.T) {
-	objs, err := generators.BundleValidatingWebhookResourceGenerator(nil, render.Options{})
-	require.Nil(t, objs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bundle cannot be nil")
 }
 
 func Test_BundleMutatingWebhookResourceGenerator_Succeeds(t *testing.T) {
@@ -1778,6 +1736,7 @@ func Test_BundleMutatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 		name              string
 		bundle            *bundle.RegistryV1
 		opts              render.Options
+		genCtx            *render.GeneratorContext
 		expectedResources []client.Object
 	}{
 		{
@@ -1820,9 +1779,9 @@ func Test_BundleMutatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{""},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&admissionregistrationv1.MutatingWebhookConfiguration{
 					TypeMeta: metav1.TypeMeta{
@@ -1915,9 +1874,9 @@ func Test_BundleMutatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{"watch-namespace-one", "watch-namespace-two"},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&admissionregistrationv1.MutatingWebhookConfiguration{
 					TypeMeta: metav1.TypeMeta{
@@ -1992,10 +1951,10 @@ func Test_BundleMutatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{"watch-namespace-one", "watch-namespace-two"},
 				CertificateProvider: fakeProvider,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&admissionregistrationv1.MutatingWebhookConfiguration{
 					TypeMeta: metav1.TypeMeta{
@@ -2035,18 +1994,11 @@ func Test_BundleMutatingWebhookResourceGenerator_Succeeds(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			objs, err := generators.BundleMutatingWebhookResourceGenerator(tc.bundle, tc.opts)
+			err := generators.BundleMutatingWebhookResourceGenerator(*tc.bundle, tc.opts, tc.genCtx)
 			require.NoError(t, err)
-			require.Equal(t, tc.expectedResources, objs)
+			require.Equal(t, tc.expectedResources, tc.genCtx.Objects)
 		})
 	}
-}
-
-func Test_BundleMutatingWebhookResourceGenerator_FailsOnNil(t *testing.T) {
-	objs, err := generators.BundleMutatingWebhookResourceGenerator(nil, render.Options{})
-	require.Nil(t, objs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bundle cannot be nil")
 }
 
 func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
@@ -2062,6 +2014,7 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 		name              string
 		bundle            *bundle.RegistryV1
 		opts              render.Options
+		genCtx            *render.GeneratorContext
 		expectedResources []client.Object
 	}{
 		{
@@ -2080,9 +2033,9 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{"watch-namespace-one", "watch-namespace-two"},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&corev1.Service{
 					TypeMeta: metav1.TypeMeta{
@@ -2125,9 +2078,9 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{"watch-namespace-one", "watch-namespace-two"},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&corev1.Service{
 					TypeMeta: metav1.TypeMeta{
@@ -2173,9 +2126,9 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{"watch-namespace-one", "watch-namespace-two"},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&corev1.Service{
 					TypeMeta: metav1.TypeMeta{
@@ -2222,9 +2175,9 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{"watch-namespace-one", "watch-namespace-two"},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&corev1.Service{
 					TypeMeta: metav1.TypeMeta{
@@ -2278,9 +2231,9 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{"watch-namespace-one", "watch-namespace-two"},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&corev1.Service{
 					TypeMeta: metav1.TypeMeta{
@@ -2354,9 +2307,9 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "install-namespace",
 				TargetNamespaces: []string{"watch-namespace-one", "watch-namespace-two"},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&corev1.Service{
 					TypeMeta: metav1.TypeMeta{
@@ -2422,10 +2375,10 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace:    "install-namespace",
 				TargetNamespaces:    []string{"watch-namespace-one", "watch-namespace-two"},
 				CertificateProvider: fakeProvider,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "install-namespace"},
 			expectedResources: []client.Object{
 				&corev1.Service{
 					TypeMeta: metav1.TypeMeta{
@@ -2456,18 +2409,11 @@ func Test_BundleDeploymentServiceResourceGenerator_Succeeds(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			objs, err := generators.BundleDeploymentServiceResourceGenerator(tc.bundle, tc.opts)
+			err := generators.BundleDeploymentServiceResourceGenerator(*tc.bundle, tc.opts, tc.genCtx)
 			require.NoError(t, err)
-			require.Equal(t, tc.expectedResources, objs)
+			require.Equal(t, tc.expectedResources, tc.genCtx.Objects)
 		})
 	}
-}
-
-func Test_BundleDeploymentServiceResourceGenerator_FailsOnNil(t *testing.T) {
-	objs, err := generators.BundleMutatingWebhookResourceGenerator(nil, render.Options{})
-	require.Nil(t, objs)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "bundle cannot be nil")
 }
 
 func Test_CertProviderResourceGenerator_Succeeds(t *testing.T) {
@@ -2482,7 +2428,8 @@ func Test_CertProviderResourceGenerator_Succeeds(t *testing.T) {
 		},
 	}
 
-	objs, err := generators.CertProviderResourceGenerator(&bundle.RegistryV1{
+	ctx := &render.GeneratorContext{InstallNamespace: "install-namespace"}
+	err := generators.CertProviderResourceGenerator(bundle.RegistryV1{
 		CSV: clusterserviceversion.Builder().
 			WithWebhookDefinitions(
 				// only generate resources for deployments referenced by webhook definitions
@@ -2500,16 +2447,15 @@ func Test_CertProviderResourceGenerator_Succeeds(t *testing.T) {
 				},
 			).Build(),
 	}, render.Options{
-		InstallNamespace:    "install-namespace",
 		CertificateProvider: fakeProvider,
-	})
+	}, ctx)
 	require.NoError(t, err)
 	require.Equal(t, []client.Object{
 		ToUnstructuredT(t, &corev1.Secret{
 			TypeMeta:   metav1.TypeMeta{Kind: "Secret", APIVersion: corev1.SchemeGroupVersion.String()},
 			ObjectMeta: metav1.ObjectMeta{Name: "my-deployment-service-cert"},
 		}),
-	}, objs)
+	}, ctx.Objects)
 }
 
 func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
@@ -2517,6 +2463,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 		name   string
 		bundle *bundle.RegistryV1
 		opts   render.Options
+		genCtx *render.GeneratorContext
 		verify func(*testing.T, []client.Object)
 	}{
 		{
@@ -2544,7 +2491,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Env: []corev1.EnvVar{
@@ -2553,6 +2499,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -2605,7 +2552,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Resources: &corev1.ResourceRequirements{
@@ -2620,6 +2566,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -2651,7 +2598,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Tolerations: []corev1.Toleration{
@@ -2664,6 +2610,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -2699,7 +2646,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					NodeSelector: map[string]string{
@@ -2707,6 +2653,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -2735,7 +2682,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Affinity: &corev1.Affinity{
@@ -2757,6 +2703,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -2839,12 +2786,12 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Affinity: &corev1.Affinity{},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -2904,7 +2851,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Affinity: &corev1.Affinity{
@@ -2912,6 +2858,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -2973,7 +2920,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Affinity: &corev1.Affinity{
@@ -2985,6 +2931,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -3030,7 +2977,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Affinity: &corev1.Affinity{
@@ -3038,6 +2984,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -3072,7 +3019,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Annotations: map[string]string{
@@ -3081,6 +3027,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -3120,7 +3067,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Volumes: []corev1.Volume{
@@ -3141,6 +3087,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -3175,7 +3122,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					EnvFrom: []corev1.EnvFromSource{
@@ -3192,6 +3138,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -3228,7 +3175,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Env: []corev1.EnvVar{
@@ -3250,6 +3196,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -3294,7 +3241,6 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: &config.DeploymentConfig{
 					Env: []corev1.EnvVar{
@@ -3307,6 +3253,7 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					},
 				},
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -3349,10 +3296,10 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 					).Build(),
 			},
 			opts: render.Options{
-				InstallNamespace: "test-ns",
 				TargetNamespaces: []string{"test-ns"},
 				DeploymentConfig: nil,
 			},
+			genCtx: &render.GeneratorContext{InstallNamespace: "test-ns"},
 			verify: func(t *testing.T, objs []client.Object) {
 				require.Len(t, objs, 1)
 				dep := objs[0].(*appsv1.Deployment)
@@ -3365,9 +3312,9 @@ func Test_BundleCSVDeploymentGenerator_WithDeploymentConfig(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			objs, err := generators.BundleCSVDeploymentGenerator(tc.bundle, tc.opts)
+			err := generators.BundleCSVDeploymentGenerator(*tc.bundle, tc.opts, tc.genCtx)
 			require.NoError(t, err)
-			tc.verify(t, objs)
+			tc.verify(t, tc.genCtx.Objects)
 		})
 	}
 }
