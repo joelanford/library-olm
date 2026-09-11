@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +20,9 @@ import (
 	"github.com/joelanford/library-olm/examples/catalog_server/api"
 	"github.com/joelanford/library-olm/examples/catalog_server/internal/fbcextension"
 )
+
+//go:embed static
+var staticFiles embed.FS
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -74,12 +79,28 @@ func run(ctx context.Context, args []string) (err error) {
 	}
 	log.Printf("imported catalog %q", c.Name())
 
+	ui, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		return fmt.Errorf("loading embedded UI: %w", err)
+	}
+	hub, err := fs.Sub(staticFiles, "static/hub")
+	if err != nil {
+		return fmt.Errorf("loading embedded hub UI: %w", err)
+	}
+	apiHandler := api.NewHandler(store)
+	mountedAPI := http.StripPrefix("/api", apiHandler)
+	mux := http.NewServeMux()
+	mux.Handle("/api/v1", mountedAPI)
+	mux.Handle("/api/v1/", mountedAPI)
+	mux.Handle("/ui/hub/", http.StripPrefix("/ui/hub", http.FileServer(http.FS(hub))))
+	mux.Handle("/ui/workbench/", http.StripPrefix("/ui/workbench", http.FileServer(http.FS(ui))))
+
 	server := &http.Server{
 		Addr:              "localhost:8080",
-		Handler:           requestLogger(api.NewHandler(store)),
+		Handler:           requestLogger(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	log.Printf("serving catalog API at http://%s", server.Addr)
+	log.Printf("serving catalog API at http://%s/api/v1, hub at http://%s/ui/hub/, and workbench at http://%s/ui/workbench/", server.Addr, server.Addr, server.Addr)
 	if err := listenAndServe(ctx, server, time.Second*5); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serving catalog API: %w", err)
 	}

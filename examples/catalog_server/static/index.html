@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catalog API Workbench</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <a class="brand" href="./" aria-label="Catalog API Workbench home">
+      <span class="brand-mark">OLM</span>
+      <span>
+        <strong>Catalog API</strong>
+        <small>Interactive workbench</small>
+      </span>
+    </a>
+    <div class="server-state">
+      <span class="pulse" aria-hidden="true"></span>
+      <span>localhost:8080</span>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sidebar-heading">
+        <span>Endpoints</span>
+        <span class="endpoint-count">11</span>
+      </div>
+      <nav id="endpoint-nav" aria-label="API endpoints"></nav>
+      <div class="sidebar-note">
+        <strong>API v1</strong>
+        <span>All requests run against the catalog loaded by this example server.</span>
+      </div>
+    </aside>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">library-olm / example</p>
+          <h1>Explore the catalog,<br><em>one request at a time.</em></h1>
+        </div>
+        <p class="hero-copy">Choose an endpoint, set its inputs, and inspect the live response. Values are shared between operations so you can move through a catalog without retyping them.</p>
+      </section>
+
+      <section class="workspace" aria-live="polite">
+        <div class="request-panel">
+          <div class="operation-heading">
+            <div>
+              <span id="operation-group" class="eyebrow"></span>
+              <h2 id="operation-title"></h2>
+            </div>
+            <span id="operation-method" class="method-badge"></span>
+          </div>
+          <p id="operation-description" class="operation-description"></p>
+          <form id="request-form">
+            <div id="request-fields" class="fields"></div>
+            <div class="request-preview">
+              <span>Request</span>
+              <code id="request-url"></code>
+            </div>
+            <button class="send-button" type="submit">
+              <span>Send request</span>
+              <span aria-hidden="true">-&gt;</span>
+            </button>
+          </form>
+        </div>
+
+        <div class="response-panel">
+          <div class="response-heading">
+            <div>
+              <span class="eyebrow">Response</span>
+              <div id="response-status" class="status idle">Ready</div>
+            </div>
+            <button id="copy-response" class="copy-button" type="button" disabled>Copy JSON</button>
+          </div>
+          <div id="response-meta" class="response-meta">Send a request to see its status, duration, and content type.</div>
+          <pre id="response-body"><code>{
+  "message": "Select an endpoint and send a request."
+}</code></pre>
+          <div id="binary-response" class="binary-response" hidden></div>
+          <button id="next-page" class="next-button" type="button" hidden>Request next page -&gt;</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

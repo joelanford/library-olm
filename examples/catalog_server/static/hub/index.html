@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Browse software available in a library-olm catalog.">
+  <title>Software Hub</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="./" data-home>
+      <span class="brand-glyph" aria-hidden="true">S</span>
+      <span>Software Hub</span>
+    </a>
+    <nav aria-label="Primary navigation">
+      <a class="active" href="./" data-home>Explore</a>
+      <a href="../workbench/">API Workbench</a>
+    </nav>
+    <div class="catalog-status"><span></span> Catalog online</div>
+  </header>
+
+  <main id="app" tabindex="-1">
+    <section id="catalog-view">
+      <div class="hero">
+        <div class="hero-copy">
+          <p class="kicker">Curated software catalog</p>
+          <h1>Find the building blocks<br>for what comes <em>next.</em></h1>
+          <p>Explore operators and services ready to extend your platform. Every listing is sourced live from the catalog API.</p>
+        </div>
+        <div class="hero-orbit" aria-hidden="true">
+          <div class="orbit orbit-one"></div>
+          <div class="orbit orbit-two"></div>
+          <div class="orbit-core">OLM</div>
+          <span class="orbit-dot dot-one"></span>
+          <span class="orbit-dot dot-two"></span>
+          <span class="orbit-dot dot-three"></span>
+        </div>
+      </div>
+
+      <div class="catalog-tools">
+        <div>
+          <p class="section-label">Catalog</p>
+          <h2>Available software</h2>
+        </div>
+        <label class="search">
+          <span class="search-icon" aria-hidden="true"></span>
+          <span class="sr-only">Search software</span>
+          <input id="search" type="search" placeholder="Search by name or provider">
+        </label>
+      </div>
+
+      <div class="catalog-summary">
+        <span class="inventory-mark" aria-hidden="true"></span>
+        <span class="inventory-label">Catalog inventory</span>
+        <strong id="catalog-total">0 total listings</strong>
+        <span class="inventory-source">from catalog API</span>
+      </div>
+      <div id="product-grid" class="product-grid" aria-live="polite"></div>
+      <div id="load-sentinel" class="load-sentinel" hidden>
+        <span class="loading-mark" aria-hidden="true"></span>
+        <span>Loading more software</span>
+      </div>
+    </section>
+
+    <section id="detail-view" class="detail-view" hidden aria-live="polite"></section>
+  </main>
+
+  <footer>
+    <span>Software Hub</span>
+    <span>Powered by library-olm</span>
+  </footer>
+
+  <template id="product-template">
+    <article class="product-card">
+      <div class="product-topline">
+        <div class="product-icon"></div>
+        <span class="catalog-pill"></span>
+      </div>
+      <div class="product-copy">
+        <p class="provider"></p>
+        <h3></h3>
+        <p class="description"></p>
+      </div>
+      <div class="product-footer">
+        <span class="product-name"></span>
+        <span class="arrow" aria-hidden="true">-&gt;</span>
+      </div>
+    </article>
+  </template>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
