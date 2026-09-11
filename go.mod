@@ -4,11 +4,13 @@ go 1.25.7
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
+	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/blang/semver/v4 v4.0.0
 	github.com/cert-manager/cert-manager v1.20.0
 	github.com/containerd/containerd v1.7.30
 	github.com/google/go-cmp v0.7.0
 	github.com/google/renameio/v2 v2.0.2
+	github.com/mitchellh/copystructure v1.2.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/operator-framework/api v0.41.0
@@ -51,7 +53,6 @@ require (
 	github.com/Djarvur/go-err113 v0.1.1 // indirect
 	github.com/MakeNowJust/heredoc v1.0.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
-	github.com/Masterminds/sprig/v3 v3.3.0 // indirect
 	github.com/Masterminds/squirrel v1.5.4 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/Microsoft/hcsshim v0.13.0 // indirect
@@ -244,7 +245,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/mgechev/revive v1.15.0 // indirect
-	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect

@@ -135,8 +135,17 @@ func parsePackage(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx) err
 	if err != nil {
 		return nil, fmt.Errorf("OnPackage(%q): %w", p.Name, err)
 	}
+	var iconPresent bool
+	var iconData []byte
+	var iconMediaType string
+	if p.Icon != nil {
+		iconPresent = true
+		iconData = p.Icon.Data
+		iconMediaType = p.Icon.MediaType
+	}
 	return func(tx *sql.Tx) error {
-		_, err := tx.Exec("INSERT INTO "+TableRawPackage+" (package_name, ext_data) VALUES (?, ?)", p.Name, nullableJSON(extData))
+		_, err := tx.Exec("INSERT INTO "+TableRawPackage+" (package_name, description, icon_present, icon_data, icon_media_type, ext_data) VALUES (?, ?, ?, ?, ?, ?)",
+			p.Name, p.Description, iconPresent, iconData, iconMediaType, nullableJSON(extData))
 		return err
 	}, nil
 }
@@ -181,11 +190,32 @@ func parseBundle(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx) erro
 	if err != nil {
 		return nil, fmt.Errorf("OnBundle(%q): %w", b.Name, err)
 	}
+	csvMetadata, err := extractCSVMetadata(b)
+	if err != nil {
+		return nil, err
+	}
 	return func(tx *sql.Tx) error {
-		_, err := tx.Exec("INSERT INTO "+TableRawBundle+" (name, package_name, version, release, image, ext_data) VALUES (?, ?, ?, ?, ?, ?)",
-			b.Name, b.Package, version, release, b.Image, nullableJSON(extData))
+		_, err := tx.Exec("INSERT INTO "+TableRawBundle+" (name, package_name, version, release, image, csv_metadata, ext_data) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			b.Name, b.Package, version, release, b.Image, nullableJSON(csvMetadata), nullableJSON(extData))
 		return err
 	}, nil
+}
+
+func extractCSVMetadata(b declcfg.Bundle) ([]byte, error) {
+	var metadata []byte
+	for _, prop := range b.Properties {
+		if prop.Type != property.TypeCSVMetadata {
+			continue
+		}
+		if metadata != nil {
+			return nil, fmt.Errorf("bundle %q has multiple %s properties", b.Name, property.TypeCSVMetadata)
+		}
+		if !json.Valid(prop.Value) {
+			return nil, fmt.Errorf("parse %s property for bundle %q: invalid JSON", property.TypeCSVMetadata, b.Name)
+		}
+		metadata = prop.Value
+	}
+	return metadata, nil
 }
 
 func parseDeprecation(meta *declcfg.Meta, ext IngestExtension) (func(tx *sql.Tx) error, error) {

@@ -1,0 +1,1183 @@
+openapi: 3.1.0
+info:
+  title: library-olm Catalog API
+  version: 1.0.0
+  description: |
+    The authoritative wire contract for the embeddable library-olm catalog HTTP
+    handler. The `/v1` prefix versions this HTTP contract independently of the
+    Go package. Authentication, authorization, and server lifecycle are owned by
+    the application mounting the handler.
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+servers:
+  - url: /v1
+tags:
+  - name: Catalogs
+  - name: Packages
+  - name: Channels
+  - name: Bundles
+  - name: Recommendations
+paths:
+  /catalogs:
+    get:
+      operationId: listCatalogs
+      tags: [Catalogs]
+      summary: List catalogs
+      description: Catalogs are sorted by catalog name ascending.
+      x-sort-order:
+        - catalog name ascending
+      parameters:
+        - $ref: '#/components/parameters/CatalogSelector'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A deterministic page of catalog summaries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogCollection'
+        '400':
+          $ref: '#/components/responses/SelectorOrCursorInvalid'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/StaleCursor'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+  /catalogs/{catalog}:
+    parameters:
+      - $ref: '#/components/parameters/CatalogName'
+    get:
+      operationId: getCatalog
+      tags: [Catalogs]
+      summary: Get catalog detail
+      responses:
+        '200':
+          description: Catalog detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogDetail'
+        '400':
+          $ref: '#/components/responses/MalformedInput'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+  /packages:
+    get:
+      operationId: listPackages
+      tags: [Packages]
+      summary: Discover package occurrences
+      description: |
+        Returns every catalog-scoped package occurrence without merging equal
+        package names. Items are sorted by package name ascending, catalog
+        priority descending, then catalog name ascending.
+      x-sort-order:
+        - package name ascending
+        - catalog priority descending
+        - catalog name ascending
+      parameters:
+        - $ref: '#/components/parameters/CatalogSelector'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A deterministic page of package summaries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageCollection'
+        '400':
+          $ref: '#/components/responses/SelectorOrCursorInvalid'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/StaleCursor'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+  /recommendations/{package}:
+    parameters:
+      - $ref: '#/components/parameters/PackageName'
+    post:
+      operationId: recommendBundles
+      tags: [Recommendations]
+      summary: Recommend install or upgrade candidates
+      description: |
+        Selects one package occurrence by descending catalog priority groups and
+        returns candidates in canonical resolver order. The handler does not
+        rerank candidates. A continuation request must repeat the identical JSON
+        body and catalog selector used to obtain the cursor.
+      x-sort-order:
+        - canonical resolver order, preserved unchanged
+      parameters:
+        - $ref: '#/components/parameters/CatalogSelector'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendationRequest'
+      responses:
+        '200':
+          description: The selected package occurrence and ranked candidates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Recommendation'
+        '400':
+          $ref: '#/components/responses/RecommendationInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/RecommendationConflict'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+  /catalogs/{catalog}/packages/{package}:
+    parameters:
+      - $ref: '#/components/parameters/CatalogName'
+      - $ref: '#/components/parameters/PackageName'
+    get:
+      operationId: getPackage
+      tags: [Packages]
+      summary: Get package detail
+      responses:
+        '200':
+          description: Package detail with portable presentation metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageDetail'
+        '400':
+          $ref: '#/components/responses/MalformedInput'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+  /catalogs/{catalog}/packages/{package}/channels:
+    parameters:
+      - $ref: '#/components/parameters/CatalogName'
+      - $ref: '#/components/parameters/PackageName'
+    get:
+      operationId: listChannels
+      tags: [Channels]
+      summary: List all descendant channels
+      description: |
+        Recursively lists every descendant update graph. Channel paths are
+        sorted lexicographically by segment, with a shorter path first when it
+        is an exact prefix of another path.
+      x-sort-order:
+        - channel path segments lexicographically ascending
+        - shorter prefix path first
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A deterministic page of recursively discovered channels.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelCollection'
+        '400':
+          $ref: '#/components/responses/CursorInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/StaleCursor'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+  /catalogs/{catalog}/packages/{package}/channels/{channelPath}:
+    parameters:
+      - $ref: '#/components/parameters/CatalogName'
+      - $ref: '#/components/parameters/PackageName'
+      - $ref: '#/components/parameters/ChannelPath'
+    get:
+      operationId: getChannel
+      tags: [Channels]
+      summary: Get nested channel detail
+      responses:
+        '200':
+          description: Detail for the channel addressed by the ordered path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDetail'
+        '400':
+          $ref: '#/components/responses/MalformedInput'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+  /catalogs/{catalog}/packages/{package}/bundles:
+    parameters:
+      - $ref: '#/components/parameters/CatalogName'
+      - $ref: '#/components/parameters/PackageName'
+    get:
+      operationId: listPackageBundles
+      tags: [Bundles]
+      summary: List bundles visible from the package root graph
+      description: |
+        For a composite package this is the union returned by the package root's
+        ListBundles operation across all descendants. Items are sorted by
+        semantic version descending, release descending according to the catalog
+        release comparison rules, then bundle ID ascending. This endpoint does
+        not accept a channel path query parameter.
+      x-sort-order:
+        - semantic version descending
+        - release descending
+        - bundle ID ascending
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A deterministic page of package-root bundles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BundleCollection'
+        '400':
+          $ref: '#/components/responses/CursorInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/StaleCursor'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+  /catalogs/{catalog}/packages/{package}/channels/{channelPath}/bundles:
+    parameters:
+      - $ref: '#/components/parameters/CatalogName'
+      - $ref: '#/components/parameters/PackageName'
+      - $ref: '#/components/parameters/ChannelPath'
+    get:
+      operationId: listChannelBundles
+      tags: [Bundles]
+      summary: List bundles visible from one channel graph
+      description: |
+        For a composite channel this is the union returned by the addressed
+        graph's ListBundles operation across its descendants. Items are sorted
+        by semantic version descending, release descending according to the
+        catalog release comparison rules, then bundle ID ascending.
+      x-sort-order:
+        - semantic version descending
+        - release descending
+        - bundle ID ascending
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A deterministic page of bundles from the addressed channel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BundleCollection'
+        '400':
+          $ref: '#/components/responses/PathOrCursorInvalid'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/StaleCursor'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+  /catalogs/{catalog}/packages/{package}/bundles/{bundleID}:
+    parameters:
+      - $ref: '#/components/parameters/CatalogName'
+      - $ref: '#/components/parameters/PackageName'
+      - $ref: '#/components/parameters/BundleID'
+    get:
+      operationId: getBundle
+      tags: [Bundles]
+      summary: Get bundle detail
+      responses:
+        '200':
+          description: Detail for a bundle visible from the package root.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BundleDetail'
+        '400':
+          $ref: '#/components/responses/MalformedInput'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+  /catalogs/{catalog}/packages/{package}/icon:
+    parameters:
+      - $ref: '#/components/parameters/CatalogName'
+      - $ref: '#/components/parameters/PackageName'
+    get:
+      operationId: getPackageIcon
+      tags: [Packages]
+      summary: Stream package icon content
+      description: |
+        Streams the available icon using its declared media type. The current
+        contract supports streamable content only and defines no redirect
+        response for referenced icons.
+      responses:
+        '200':
+          description: Binary icon content. Content-Type is the icon's declared media type.
+          headers:
+            Content-Disposition:
+              required: true
+              description: Forces download rather than inline rendering of untrusted active image content.
+              schema:
+                type: string
+                const: attachment
+            Content-Security-Policy:
+              required: true
+              description: Restricts active content if the icon is directly navigated to.
+              schema:
+                type: string
+                const: "default-src 'none'; sandbox"
+            X-Content-Type-Options:
+              required: true
+              description: Prevents media type sniffing.
+              schema:
+                type: string
+                const: nosniff
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/MalformedInput'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/CatalogReadFailure'
+components:
+  parameters:
+    CatalogName:
+      name: catalog
+      in: path
+      required: true
+      description: Catalog name.
+      schema:
+        type: string
+        minLength: 1
+    PackageName:
+      name: package
+      in: path
+      required: true
+      description: Package name.
+      schema:
+        type: string
+        minLength: 1
+    BundleID:
+      name: bundleID
+      in: path
+      required: true
+      description: Bundle identifier unique within the catalog.
+      schema:
+        type: string
+        minLength: 1
+    ChannelPath:
+      name: channelPath
+      in: path
+      required: true
+      description: |
+        One colon-delimited scalar encoding an ordered channel path. For example,
+        `stable:1:2` encodes `["stable", "1", "2"]`. Every segment must be
+        non-empty and a colon is prohibited inside a segment. JSON channel paths
+        remain ordered arrays and are not encoded as this scalar.
+      schema:
+        type: string
+        minLength: 1
+        pattern: '^[^:]+(?::[^:]+)*$'
+        examples:
+          - stable
+          - stable:1:2
+    CatalogSelector:
+      name: catalogSelector
+      in: query
+      required: false
+      description: |
+        Kubernetes label selector used only to narrow the catalogs visible
+        through the handler's base StoreReader. Omission selects all visible
+        catalogs. An empty value is equivalent to omission.
+      schema:
+        type: string
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: |
+        Opaque stateless continuation token. Clients must not inspect or
+        construct it. A continuation uses the same non-pagination inputs as the
+        original request.
+      schema:
+        type: string
+        minLength: 1
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of items to return.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  schemas:
+    ResourceLink:
+      type: object
+      description: Root-relative link to a resource in this API, including the handler's request mount prefix when present.
+      additionalProperties: false
+      required: [href]
+      properties:
+        href:
+          type: string
+          format: uri-reference
+    CatalogSummaryLinks:
+      type: object
+      additionalProperties: false
+      required: [self]
+      properties:
+        self:
+          $ref: '#/components/schemas/ResourceLink'
+    CatalogDetailLinks:
+      type: object
+      additionalProperties: false
+      required: [self]
+      properties:
+        self:
+          $ref: '#/components/schemas/ResourceLink'
+    PackageSummaryLinks:
+      type: object
+      additionalProperties: false
+      required: [self, catalog]
+      properties:
+        self:
+          $ref: '#/components/schemas/ResourceLink'
+        catalog:
+          $ref: '#/components/schemas/ResourceLink'
+    PackageDetailLinks:
+      type: object
+      additionalProperties: false
+      required: [self, catalog, channels, bundles]
+      properties:
+        self:
+          $ref: '#/components/schemas/ResourceLink'
+        catalog:
+          $ref: '#/components/schemas/ResourceLink'
+        channels:
+          $ref: '#/components/schemas/ResourceLink'
+        bundles:
+          $ref: '#/components/schemas/ResourceLink'
+        icon:
+          $ref: '#/components/schemas/ResourceLink'
+    ChannelSummaryLinks:
+      type: object
+      additionalProperties: false
+      required: [self]
+      properties:
+        self:
+          $ref: '#/components/schemas/ResourceLink'
+    ChannelDetailLinks:
+      type: object
+      additionalProperties: false
+      required: [self, package, bundles]
+      properties:
+        self:
+          $ref: '#/components/schemas/ResourceLink'
+        package:
+          $ref: '#/components/schemas/ResourceLink'
+        bundles:
+          $ref: '#/components/schemas/ResourceLink'
+    BundleSummaryLinks:
+      type: object
+      additionalProperties: false
+      required: [self]
+      properties:
+        self:
+          $ref: '#/components/schemas/ResourceLink'
+    BundleDetailLinks:
+      type: object
+      additionalProperties: false
+      required: [self, package, catalog]
+      properties:
+        self:
+          $ref: '#/components/schemas/ResourceLink'
+        package:
+          $ref: '#/components/schemas/ResourceLink'
+        catalog:
+          $ref: '#/components/schemas/ResourceLink'
+    CatalogSummary:
+      type: object
+      additionalProperties: false
+      required: [name, uri, digest, priority, labels, links]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        uri:
+          type: string
+          description: Catalog source URI, or an empty string when unspecified.
+        digest:
+          type: string
+          description: Catalog content digest, or an empty string when unavailable.
+        priority:
+          type: integer
+        labels:
+          type: object
+          description: Kubernetes labels associated with this catalog.
+          propertyNames:
+            minLength: 1
+          additionalProperties:
+            type: string
+        links:
+          $ref: '#/components/schemas/CatalogSummaryLinks'
+    CatalogDetail:
+      type: object
+      additionalProperties: false
+      required: [name, uri, digest, priority, labels, links]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        uri:
+          type: string
+          description: Catalog source URI, or an empty string when unspecified.
+        digest:
+          type: string
+          description: Catalog content digest, or an empty string when unavailable.
+        priority:
+          type: integer
+        labels:
+          type: object
+          propertyNames:
+            minLength: 1
+          additionalProperties:
+            type: string
+        links:
+          $ref: '#/components/schemas/CatalogDetailLinks'
+    Provider:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+          pattern: '^https?://'
+    Maintainer:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+    PackageSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - catalogName
+        - catalogPriority
+        - name
+        - displayName
+        - shortDescription
+        - provider
+        - iconAvailable
+        - links
+      properties:
+        catalogName:
+          type: string
+          minLength: 1
+        catalogPriority:
+          type: integer
+        name:
+          type: string
+          minLength: 1
+        displayName:
+          type: string
+        shortDescription:
+          type: string
+        provider:
+          $ref: '#/components/schemas/Provider'
+        iconAvailable:
+          type: boolean
+        deprecationMessage:
+          type: string
+          minLength: 1
+          description: Present only when the package is deprecated.
+        links:
+          $ref: '#/components/schemas/PackageSummaryLinks'
+    PackageDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - catalogName
+        - catalogPriority
+        - name
+        - displayName
+        - shortDescription
+        - description
+        - provider
+        - maintainers
+        - keywords
+        - iconAvailable
+        - links
+      properties:
+        catalogName:
+          type: string
+          minLength: 1
+        catalogPriority:
+          type: integer
+        name:
+          type: string
+          minLength: 1
+        displayName:
+          type: string
+        shortDescription:
+          type: string
+        description:
+          type: string
+        provider:
+          $ref: '#/components/schemas/Provider'
+        maintainers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Maintainer'
+        keywords:
+          type: array
+          items:
+            type: string
+        sourceRepository:
+          type: string
+          format: uri
+          pattern: '^https?://'
+        iconAvailable:
+          type: boolean
+        deprecationMessage:
+          type: string
+          minLength: 1
+          description: Present only when the package is deprecated.
+        links:
+          $ref: '#/components/schemas/PackageDetailLinks'
+    ChannelSegment:
+      type: string
+      minLength: 1
+      pattern: '^[^:]+$'
+      description: Non-empty graph-name segment. A colon is prohibited.
+    ChannelPath:
+      type: array
+      minItems: 1
+      description: Ordered graph-name segments relative to the package root.
+      items:
+        $ref: '#/components/schemas/ChannelSegment'
+    ChannelSummary:
+      type: object
+      additionalProperties: false
+      required: [name, path, links]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Last segment of path and the addressed graph's name.
+        path:
+          $ref: '#/components/schemas/ChannelPath'
+        deprecationMessage:
+          type: string
+          minLength: 1
+          description: Present only when the channel is deprecated.
+        links:
+          $ref: '#/components/schemas/ChannelSummaryLinks'
+    ChannelDetail:
+      type: object
+      additionalProperties: false
+      required: [name, path, links]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Last segment of path and the addressed graph's name.
+        path:
+          $ref: '#/components/schemas/ChannelPath'
+        deprecationMessage:
+          type: string
+          minLength: 1
+          description: Present only when the channel is deprecated.
+        links:
+          $ref: '#/components/schemas/ChannelDetailLinks'
+    SemanticVersion:
+      type: string
+      description: Semantic Versioning 2.0.0 value.
+      pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+    Release:
+      type: string
+      description: Empty or dot-separated numeric or alphanumeric release identifiers.
+      pattern: '^(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+    BundleIdentity:
+      type: object
+      additionalProperties: false
+      required: [id, packageName, version, release]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        packageName:
+          type: string
+          minLength: 1
+        version:
+          $ref: '#/components/schemas/SemanticVersion'
+        release:
+          $ref: '#/components/schemas/Release'
+    BundleSummary:
+      type: object
+      additionalProperties: false
+      required: [id, packageName, version, release, uri, links]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        packageName:
+          type: string
+          minLength: 1
+        version:
+          $ref: '#/components/schemas/SemanticVersion'
+        release:
+          $ref: '#/components/schemas/Release'
+        uri:
+          type: string
+          description: Bundle content URI. An empty value means the URI is unavailable.
+        deprecationMessage:
+          type: string
+          minLength: 1
+          description: Present only when the bundle is deprecated.
+        links:
+          $ref: '#/components/schemas/BundleSummaryLinks'
+    BundleDetail:
+      type: object
+      additionalProperties: false
+      required: [id, packageName, version, release, uri, links]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        packageName:
+          type: string
+          minLength: 1
+        version:
+          $ref: '#/components/schemas/SemanticVersion'
+        release:
+          $ref: '#/components/schemas/Release'
+        uri:
+          type: string
+          description: Bundle content URI.
+        mediaType:
+          type: string
+          minLength: 1
+          description: Optional media type reported by bundle release metadata.
+        releaseTimestamp:
+          type: string
+          format: date-time
+          description: Optional RFC 3339 release timestamp.
+        deprecationMessage:
+          type: string
+          minLength: 1
+          description: Present only when the bundle is deprecated.
+        links:
+          $ref: '#/components/schemas/BundleDetailLinks'
+    UpgradeConstraintPolicy:
+      type: string
+      description: |
+        `CatalogProvided` restricts an upgrade to immediate graph successors.
+        `SelfCertified` ignores graph edges while retaining package, channel,
+        version, catalog, and deprecation constraints.
+      enum: [CatalogProvided, SelfCertified]
+      default: CatalogProvided
+    RecommendationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        currentBundle:
+          $ref: '#/components/schemas/BundleIdentity'
+          description: Omission requests initial-install candidates. packageName must equal the package path parameter.
+        channelPaths:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Omission selects all channels. Each path remains an ordered segment array.
+          items:
+            $ref: '#/components/schemas/ChannelPath'
+        versionConstraint:
+          type: string
+          minLength: 1
+          description: Semantic-version constraint accepted by the resolver.
+        upgradeConstraintPolicy:
+          $ref: '#/components/schemas/UpgradeConstraintPolicy'
+    CatalogCollection:
+      type: object
+      additionalProperties: false
+      required: [catalogs, total]
+      properties:
+        catalogs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogSummary'
+        total:
+          type: integer
+          minimum: 0
+          description: Number of catalogs after filtering and before applying cursor and limit.
+        nextCursor:
+          type: string
+          minLength: 1
+          description: Present only when another page is available.
+    PackageCollection:
+      type: object
+      additionalProperties: false
+      required: [packages, total]
+      properties:
+        packages:
+          type: array
+          items:
+            $ref: '#/components/schemas/PackageSummary'
+        total:
+          type: integer
+          minimum: 0
+          description: Number of package occurrences after filtering and before applying cursor and limit.
+        nextCursor:
+          type: string
+          minLength: 1
+          description: Present only when another page is available.
+    ChannelCollection:
+      type: object
+      additionalProperties: false
+      required: [channels, total]
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChannelSummary'
+        total:
+          type: integer
+          minimum: 0
+          description: Number of channels before applying cursor and limit.
+        nextCursor:
+          type: string
+          minLength: 1
+          description: Present only when another page is available.
+    BundleCollection:
+      type: object
+      additionalProperties: false
+      required: [bundles, total]
+      properties:
+        bundles:
+          type: array
+          items:
+            $ref: '#/components/schemas/BundleSummary'
+        total:
+          type: integer
+          minimum: 0
+          description: Number of bundles before applying cursor and limit.
+        nextCursor:
+          type: string
+          minLength: 1
+          description: Present only when another page is available.
+    Recommendation:
+      type: object
+      additionalProperties: false
+      required: [catalog, package, candidates, total]
+      properties:
+        catalog:
+          $ref: '#/components/schemas/CatalogSummary'
+        package:
+          $ref: '#/components/schemas/PackageSummary'
+        candidates:
+          type: array
+          description: Candidates in canonical resolver order, without HTTP-layer reranking.
+          items:
+            $ref: '#/components/schemas/BundleSummary'
+        total:
+          type: integer
+          minimum: 0
+          description: Number of resolved candidates before applying cursor and limit.
+        nextCursor:
+          type: string
+          minLength: 1
+          description: Present only when another resolver-ordered page is available.
+    InvalidParameter:
+      type: object
+      additionalProperties: false
+      required: [name, reason]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: JSON field, path parameter, or query parameter name.
+        reason:
+          type: string
+          minLength: 1
+    ProblemDetails:
+      type: object
+      description: RFC 9457 Problem Details. Problem-specific extension members may be present.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+          minLength: 1
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        invalidParams:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/InvalidParameter'
+    MalformedInputProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status, invalidParams]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/malformed-input
+            title:
+              const: Malformed input
+            status:
+              const: 400
+    InvalidCatalogSelectorProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status, invalidParams]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/invalid-catalog-selector
+            title:
+              const: Invalid catalog selector
+            status:
+              const: 400
+    InvalidVersionConstraintProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status, invalidParams]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/invalid-version-constraint
+            title:
+              const: Invalid semantic-version constraint
+            status:
+              const: 400
+    UnsupportedPolicyProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status, invalidParams]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/unsupported-upgrade-constraint-policy
+            title:
+              const: Unsupported upgrade constraint policy
+            status:
+              const: 400
+    InvalidCursorProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status, invalidParams]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/invalid-cursor
+            title:
+              const: Invalid cursor
+            status:
+              const: 400
+    NotFoundProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/not-found
+            title:
+              const: Resource not found
+            status:
+              const: 404
+    MethodNotAllowedProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/method-not-allowed
+            title:
+              const: Method not allowed
+            status:
+              const: 405
+    StaleCursorProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/stale-cursor
+            title:
+              const: Stale cursor
+            status:
+              const: 409
+    AmbiguousPackageProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/ambiguous-package
+            title:
+              const: Ambiguous package
+            status:
+              const: 409
+    UnsupportedMediaTypeProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/unsupported-media-type
+            title:
+              const: Unsupported media type
+            status:
+              const: 415
+    CatalogReadFailureProblem:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [type, title, status]
+          properties:
+            type:
+              const: https://library-olm.dev/problems/v1/catalog-read-failure
+            title:
+              const: Catalog read failure
+            status:
+              const: 500
+  responses:
+    SelectorOrCursorInvalid:
+      description: The catalog selector, cursor, limit, or another request value is invalid.
+      content:
+        application/problem+json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/MalformedInputProblem'
+              - $ref: '#/components/schemas/InvalidCatalogSelectorProblem'
+              - $ref: '#/components/schemas/InvalidCursorProblem'
+    CursorInvalid:
+      description: The cursor, limit, or another request value is invalid.
+      content:
+        application/problem+json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/MalformedInputProblem'
+              - $ref: '#/components/schemas/InvalidCursorProblem'
+    PathOrCursorInvalid:
+      description: The channel path, cursor, limit, or another request value is invalid.
+      content:
+        application/problem+json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/MalformedInputProblem'
+              - $ref: '#/components/schemas/InvalidCursorProblem'
+    RecommendationInvalid:
+      description: The query or JSON recommendation criteria are invalid.
+      content:
+        application/problem+json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/MalformedInputProblem'
+              - $ref: '#/components/schemas/InvalidCatalogSelectorProblem'
+              - $ref: '#/components/schemas/InvalidVersionConstraintProblem'
+              - $ref: '#/components/schemas/UnsupportedPolicyProblem'
+              - $ref: '#/components/schemas/InvalidCursorProblem'
+    MalformedInput:
+      description: A path or another request value is malformed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/MalformedInputProblem'
+    NotFound:
+      description: The requested catalog, package, channel, bundle, or icon does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/NotFoundProblem'
+    MethodNotAllowed:
+      description: The resource exists but does not support the request method. The Allow header lists supported methods.
+      headers:
+        Allow:
+          required: true
+          schema:
+            type: string
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/MethodNotAllowedProblem'
+    StaleCursor:
+      description: Selected catalog metadata or normalized request inputs changed after the cursor was issued.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/StaleCursorProblem'
+    RecommendationConflict:
+      description: The cursor is stale or more than one equal-priority catalog contains the package.
+      content:
+        application/problem+json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/StaleCursorProblem'
+              - $ref: '#/components/schemas/AmbiguousPackageProblem'
+    UnsupportedMediaType:
+      description: The recommendation request body is not application/json.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/UnsupportedMediaTypeProblem'
+    CatalogReadFailure:
+      description: Required catalog content could not be read. Internal storage details are not exposed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/CatalogReadFailureProblem'

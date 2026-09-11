@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"path/filepath"
 	"slices"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/operator-framework/operator-registry/alpha/declcfg"
 	"github.com/stretchr/testify/assert"
@@ -77,7 +79,7 @@ func TestImporter_ValidCatalog(t *testing.T) {
 
 	t.Run("GetPackage_NotFound", func(t *testing.T) {
 		_, err := cat.GetPackage(ctx, "nonexistent")
-		require.Error(t, err)
+		require.ErrorIs(t, err, catalogv1.ErrNotFound)
 	})
 
 	t.Run("CompositeUpdateGraph", func(t *testing.T) {
@@ -105,7 +107,7 @@ func TestImporter_ValidCatalog(t *testing.T) {
 
 		t.Run("GetGraph_NotFound", func(t *testing.T) {
 			_, err := composite.GetGraph(ctx, "nonexistent")
-			require.Error(t, err)
+			require.ErrorIs(t, err, catalogv1.ErrNotFound)
 		})
 
 		t.Run("ListBundles_Package", func(t *testing.T) {
@@ -168,6 +170,263 @@ func TestImporter_ValidCatalog(t *testing.T) {
 		assert.True(t, found.NameVersionRelease().Release.IsEmpty())
 		assert.Equal(t, "docker://quay.io/my-operator/bundle:v1.0.0", found.URI())
 	})
+}
+
+func TestImporter_PortableMetadata(t *testing.T) {
+	const packageName = "metadata-op"
+	released := time.Date(2026, time.September, 11, 12, 30, 0, 0, time.UTC)
+	fsys := catalogfs.Builder().
+		WithPackage(packageName,
+			catalogfs.WithDescription("Authoritative package description"),
+			catalogfs.WithIcon([]byte("icon data"), "image/svg+xml; charset=utf-8"),
+		).
+		WithChannel(packageName, "stable", catalogfs.Entry("1.0.0"), catalogfs.Entry("2.0.0")).
+		WithBundle(packageName, "1.0.0", catalogfs.WithCSVMetadata(csvMetadata(
+			"Old display name", "Old short description", "Old Provider", "https://old.example.com",
+			[]any{map[string]any{"name": "Old Maintainer", "email": "old@example.com"}},
+			[]string{"old"}, "https://old.example.com/source", "2025-01-02", "plain",
+		))).
+		WithBundle(packageName, "2.0.0", catalogfs.WithCSVMetadata(csvMetadata(
+			"Metadata Operator", "Portable short description", "Example Provider", "https://provider.example.com/about",
+			[]any{
+				map[string]any{"name": "One Maintainer", "email": "one@example.com"},
+				map[string]any{"name": "Name Only"},
+			},
+			[]string{"database", "storage"}, "https://github.com/example/metadata-op", "2026-09-11 12:30:00", "registry+v1",
+		))).
+		Build()
+
+	ctx := context.Background()
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
+
+	pkg, err := cat.GetPackage(ctx, packageName)
+	require.NoError(t, err)
+	metadata, err := pkg.Metadata(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "Metadata Operator", metadata.DisplayName)
+	assert.Equal(t, "Portable short description", metadata.ShortDescription)
+	assert.Equal(t, "Authoritative package description", metadata.Description)
+	assert.Equal(t, "Example Provider", metadata.Provider.Name)
+	require.NotNil(t, metadata.Provider.URL)
+	assert.Equal(t, "https://provider.example.com/about", metadata.Provider.URL.String())
+	require.Len(t, metadata.Maintainers, 2)
+	assert.Equal(t, "One Maintainer", metadata.Maintainers[0].Name)
+	require.NotNil(t, metadata.Maintainers[0].Email)
+	assert.Equal(t, "one@example.com", metadata.Maintainers[0].Email.String())
+	assert.Equal(t, "Name Only", metadata.Maintainers[1].Name)
+	assert.Nil(t, metadata.Maintainers[1].Email)
+	assert.Equal(t, []string{"database", "storage"}, metadata.Keywords)
+	require.NotNil(t, metadata.SourceRepository)
+	assert.Equal(t, "https://github.com/example/metadata-op", metadata.SourceRepository.String())
+	assert.True(t, metadata.IconAvailable)
+
+	icon, err := pkg.Icon(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, icon.Content)
+	assert.Equal(t, "image/svg+xml; charset=utf-8", icon.MediaType)
+	content, err := io.ReadAll(icon.Content)
+	require.NoError(t, err)
+	assert.Equal(t, "icon data", string(content))
+	require.NoError(t, icon.Close())
+
+	wantBundleMetadata := map[bundlev1.BundleID]bundlev1.BundleMetadata{
+		"metadata-op.v1.0.0": {
+			MediaType:        "plain",
+			ReleaseTimestamp: timePointer(time.Date(2025, time.January, 2, 0, 0, 0, 0, time.UTC)),
+		},
+		"metadata-op.v2.0.0": {
+			MediaType:        "registry+v1",
+			ReleaseTimestamp: &released,
+		},
+	}
+	for bundle, bundleErr := range pkg.ListBundles(ctx) {
+		require.NoError(t, bundleErr)
+		bundleMetadata, metadataErr := bundle.Metadata(ctx)
+		require.NoError(t, metadataErr)
+		assert.Equal(t, wantBundleMetadata[bundle.ID()], bundleMetadata)
+	}
+}
+
+func TestImporter_PresentationMetadataSelectionTieBreaks(t *testing.T) {
+	const packageName = "selection-op"
+	fsys := catalogfs.Builder().
+		WithPackage(packageName).
+		WithChannel(packageName, "stable", catalogfs.Entry("1.0.0")).
+		WithBundle(packageName, "3.0.0", catalogfs.WithName("selection-op.same-y"), catalogfs.WithRelease("rc1"), catalogfs.WithCSVMetadata(csvMetadata("Y", "", "", "", nil, nil, "", "", ""))).
+		WithBundle(packageName, "3.0.0", catalogfs.WithName("selection-op.same-z"), catalogfs.WithRelease("rc1"), catalogfs.WithCSVMetadata(csvMetadata("Selected", "", "", "", nil, nil, "", "", ""))).
+		WithBundle(packageName, "3.0.0", catalogfs.WithName("selection-op.lower-release"), catalogfs.WithCSVMetadata(csvMetadata("No release", "", "", "", nil, nil, "", "", ""))).
+		WithBundle(packageName, "1.0.0", catalogfs.WithCSVMetadata(csvMetadata("Lower version", "", "", "", nil, nil, "", "", ""))).
+		Build()
+
+	ctx := context.Background()
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
+	pkg, err := cat.GetPackage(ctx, packageName)
+	require.NoError(t, err)
+	metadata, err := pkg.Metadata(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "Selected", metadata.DisplayName)
+	assert.Equal(t, "CSV description must not override the package description", metadata.Description)
+}
+
+func TestImporter_PackageDescriptionPrecedence(t *testing.T) {
+	olderCSVMetadata := csvMetadata("", "Old short description", "", "", nil, nil, "", "", "")
+	olderCSVMetadata["description"] = "Old CSV description"
+	newerCSVMetadata := csvMetadata("", "Short description", "", "", nil, nil, "", "", "")
+	newerCSVMetadata["description"] = "CSV description"
+	fsys := catalogfs.Builder().
+		WithPackage("package-description", catalogfs.WithDescription("Package description")).
+		WithChannel("package-description", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("package-description", "1.0.0", catalogfs.WithCSVMetadata(newerCSVMetadata)).
+		WithPackage("csv-description").
+		WithChannel("csv-description", "stable", catalogfs.Entry("1.0.0"), catalogfs.Entry("2.0.0")).
+		WithBundle("csv-description", "1.0.0", catalogfs.WithCSVMetadata(olderCSVMetadata)).
+		WithBundle("csv-description", "2.0.0", catalogfs.WithCSVMetadata(newerCSVMetadata)).
+		WithPackage("short-description").
+		WithChannel("short-description", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("short-description", "1.0.0", catalogfs.WithCSVMetadata(map[string]any{
+			"annotations": map[string]string{"description": "Short description"},
+		})).
+		Build()
+
+	ctx := context.Background()
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
+
+	for packageName, wantDescription := range map[string]string{
+		"package-description": "Package description",
+		"csv-description":     "CSV description",
+		"short-description":   "Short description",
+	} {
+		pkg, err := cat.GetPackage(ctx, packageName)
+		require.NoError(t, err)
+		metadata, err := pkg.Metadata(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, wantDescription, metadata.Description)
+	}
+}
+
+func TestImporter_PresentationMetadataFallsBackFromNewerBundleWithoutCSV(t *testing.T) {
+	const packageName = "selection-fallback-op"
+	fsys := catalogfs.Builder().
+		WithPackage(packageName).
+		WithChannel(packageName, "stable", catalogfs.Entry("1.0.0"), catalogfs.Entry("2.0.0")).
+		WithBundle(packageName, "1.0.0", catalogfs.WithCSVMetadata(csvMetadata("Available metadata", "", "", "", nil, nil, "", "", ""))).
+		WithBundle(packageName, "2.0.0").
+		Build()
+
+	ctx := context.Background()
+	cat, store, importErr := importCatalog(t, ctx, fsys)
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
+	pkg, err := cat.GetPackage(ctx, packageName)
+	require.NoError(t, err)
+	metadata, err := pkg.Metadata(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "Available metadata", metadata.DisplayName)
+}
+
+func TestImporter_PortableMetadataAbsent(t *testing.T) {
+	ctx := context.Background()
+	cat, store, importErr := importCatalog(t, ctx, validCatalogFS())
+	defer func() { require.NoError(t, store.Close()) }()
+	require.NoError(t, importErr)
+	pkg, err := cat.GetPackage(ctx, "my-operator")
+	require.NoError(t, err)
+	metadata, err := pkg.Metadata(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, catalogv1.PackageMetadata{}, metadata)
+	icon, err := pkg.Icon(ctx)
+	require.NoError(t, err)
+	assert.Nil(t, icon.Content)
+	assert.NoError(t, icon.Close())
+	for bundle, bundleErr := range pkg.ListBundles(ctx) {
+		require.NoError(t, bundleErr)
+		metadata, metadataErr := bundle.Metadata(ctx)
+		require.NoError(t, metadataErr)
+		assert.Equal(t, bundlev1.BundleMetadata{}, metadata)
+	}
+}
+
+func TestImporter_MalformedPortableMetadataPartialErrors(t *testing.T) {
+	builder := catalogfs.Builder().
+		WithPackage("good-op").
+		WithChannel("good-op", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("good-op", "1.0.0", catalogfs.WithCSVMetadata(csvMetadata("Good", "", "", "", nil, nil, "", "", ""))).
+		WithPackage("bad-icon", catalogfs.WithIcon([]byte("icon"), "text/plain")).
+		WithChannel("bad-icon", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("bad-icon", "1.0.0").
+		WithPackage("bad-provider").
+		WithChannel("bad-provider", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("bad-provider", "1.0.0", catalogfs.WithCSVMetadata(csvMetadata("", "", "", "ftp://example.com", nil, nil, "", "", ""))).
+		WithPackage("bad-source").
+		WithChannel("bad-source", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("bad-source", "1.0.0", catalogfs.WithCSVMetadata(csvMetadata("", "", "", "", nil, nil, "not-a-url", "", ""))).
+		WithPackage("bad-email").
+		WithChannel("bad-email", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("bad-email", "1.0.0", catalogfs.WithCSVMetadata(csvMetadata("", "", "", "", []any{map[string]any{"name": "Bad", "email": "not-an-email"}}, nil, "", "", ""))).
+		WithPackage("bad-media-type").
+		WithChannel("bad-media-type", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("bad-media-type", "1.0.0", catalogfs.WithCSVMetadata(csvMetadata("", "", "", "", nil, nil, "", "", "unknown"))).
+		WithPackage("bad-timestamp").
+		WithChannel("bad-timestamp", "stable", catalogfs.Entry("1.0.0")).
+		WithBundle("bad-timestamp", "1.0.0", catalogfs.WithCSVMetadata(csvMetadata("", "", "", "", nil, nil, "", "yesterday", "")))
+
+	ctx := context.Background()
+	cat, store, importErr := importCatalog(t, ctx, builder.Build())
+	defer func() { require.NoError(t, store.Close()) }()
+	for _, test := range []struct {
+		pkg string
+		msg string
+	}{
+		{pkg: "bad-icon", msg: "icon media type"},
+		{pkg: "bad-provider", msg: "provider URL"},
+		{pkg: "bad-source", msg: "source repository"},
+		{pkg: "bad-email", msg: "email"},
+		{pkg: "bad-media-type", msg: "bundle media type"},
+		{pkg: "bad-timestamp", msg: "release timestamp"},
+	} {
+		requirePackageError(t, importErr, test.pkg, test.msg)
+		_, err := cat.GetPackage(ctx, test.pkg)
+		require.ErrorIs(t, err, catalogv1.ErrNotFound)
+	}
+	pkg, err := cat.GetPackage(ctx, "good-op")
+	require.NoError(t, err)
+	metadata, err := pkg.Metadata(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "Good", metadata.DisplayName)
+}
+
+func csvMetadata(displayName, shortDescription, providerName, providerURL string, maintainers []any, keywords []string, repository, createdAt, mediaType string) map[string]any {
+	annotations := map[string]string{}
+	if shortDescription != "" {
+		annotations["description"] = shortDescription
+	}
+	if repository != "" {
+		annotations["repository"] = repository
+	}
+	if createdAt != "" {
+		annotations["createdAt"] = createdAt
+	}
+	if mediaType != "" {
+		annotations["operators.operatorframework.io.bundle.mediatype.v1"] = mediaType
+	}
+	return map[string]any{
+		"annotations": annotations,
+		"description": "CSV description must not override the package description",
+		"displayName": displayName,
+		"provider":    map[string]string{"name": providerName, "url": providerURL},
+		"maintainers": maintainers,
+		"keywords":    keywords,
+	}
+}
+
+func timePointer(value time.Time) *time.Time {
+	return &value
 }
 
 func TestImporter_SkipRange(t *testing.T) {
@@ -642,7 +901,7 @@ func TestImporter_MixedValidAndMalformed(t *testing.T) {
 	assert.Equal(t, []string{"good-op"}, names)
 
 	_, err := cat.GetPackage(ctx, "bad-op")
-	require.Error(t, err)
+	require.ErrorIs(t, err, catalogv1.ErrNotFound)
 }
 
 func TestImporter_AllMalformed(t *testing.T) {

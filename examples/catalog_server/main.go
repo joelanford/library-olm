@@ -1,199 +1,141 @@
 package main
 
 import (
-	"cmp"
-	"encoding/json"
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"net/mail"
-	"net/url"
 	"os"
-	"slices"
-	"strconv"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
 
+	cataloghttp "github.com/joelanford/library-olm/catalog/http"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/catalog/v1/fbc"
 	"github.com/joelanford/library-olm/catalog/v1/sqlite"
 )
 
 func main() {
-	s, err := sqlite.OpenStore(os.Args[1])
-	if err != nil {
-		log.Fatal(err)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	if err := run(ctx, os.Args); err != nil {
+		log.Printf("catalog server: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context, args []string) (err error) {
+	if len(args) != 2 || args[1] == "" {
+		return errors.New("usage: catalog_server <fbc-dir-path>")
 	}
 
-	ch := newCatalogHandler(s)
-	log.Fatal(http.ListenAndServe("localhost:8080", ch))
-}
-
-type ListPackagesRequest struct {
-	Page     int `json:"page"`
-	PageSize int `json:"pageSize"`
-}
-
-type ListPackagesResponse struct {
-	Packages []PackageSummary `json:"packages"`
-	Count    int              `json:"count"`
-	Total    int              `json:"total"`
-}
-
-type catalogHandler struct {
-	store catalogv1.StoreReader
-	mux   *http.ServeMux
-}
-
-func newCatalogHandler(s catalogv1.StoreReader) *catalogHandler {
-	h := &catalogHandler{store: s}
-	mux := http.NewServeMux()
-	mux.Handle("/v1/packages", http.HandlerFunc(h.listPackages))
-	return &catalogHandler{store: s, mux: mux}
-}
-
-func (h *catalogHandler) listPackages(w http.ResponseWriter, r *http.Request) {
-	req, err := parseListPackagesRequestFromURLQuery(r)
+	tmpDir, err := os.MkdirTemp("", "catalog-server")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return fmt.Errorf("creating temp dir: %w", err)
 	}
-	catalogs, err := h.store.List()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	slices.SortFunc(catalogs, func(a, b catalogv1.Catalog) int {
-		return cmp.Compare(a.Name(), b.Name())
-	})
-
-	from := (req.Page - 1) * req.PageSize
-	to := req.Page * req.PageSize
-	results := make([]PackageSummary, 0, to-from)
-
-	for _, cat := range catalogs {
-		count := 0
-		for ug, ugErr := range cat.ListPackages(r.Context()) {
-			if ugErr != nil {
-				http.Error(w, ugErr.Error(), http.StatusInternalServerError)
-				return
-			}
-			if from <= count && count < to {
-				results = append(results, PackageSummary{
-					Name: ug.Name(),
-
-				})
-			}
-			count++
+	defer func() {
+		log.Printf("removing temporary catalog directory %s", tmpDir)
+		if removeErr := os.RemoveAll(tmpDir); removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("removing temp dir: %w", removeErr))
 		}
-	}
+	}()
+	tmpDB := filepath.Join(tmpDir, "catalog.db")
 
-}
-
-func parseListPackagesRequestFromURLQuery(r *http.Request) (*ListPackagesRequest, error) {
-	var req ListPackagesRequest
-	pageStr, err := url.QueryUnescape(r.URL.Query().Get("page"))
+	store, err := sqlite.OpenStore(tmpDB)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("opening catalog store: %w", err)
 	}
-	req.Page, err = strconv.Atoi(pageStr)
+	defer func() {
+		log.Printf("closing catalog store")
+		if closeErr := store.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("closing catalog store: %w", closeErr))
+		}
+		log.Printf("removing temporary catalog database %s", tmpDB)
+		if removeErr := os.Remove(tmpDB); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("removing catalog database: %w", removeErr))
+		}
+	}()
+
+	log.Printf("importing FBC catalog from %s", args[1])
+	c, err := store.Set(ctx, "catalog",
+		catalogv1.WithURI(args[1]),
+		catalogv1.WithContent(fbc.NewFSImporter(os.DirFS(args[1])), ""),
+	)
 	if err != nil {
-		return nil, err
+		var partialImportErr catalogv1.PartialImportError
+		if !errors.As(err, &partialImportErr) {
+			return fmt.Errorf("importing catalog: %w", err)
+		}
+		log.Printf("catalog imported with errors: %v", partialImportErr)
 	}
-	pageSizeStr, err := url.QueryUnescape(r.URL.Query().Get("pageSize"))
-	if err != nil {
-		return nil, err
+	log.Printf("imported catalog %q", c.Name())
+
+	server := &http.Server{
+		Addr:              "localhost:8080",
+		Handler:           requestLogger(cataloghttp.NewHandler(store)),
+		ReadHeaderTimeout: 5 * time.Second,
 	}
-	req.PageSize, err = strconv.Atoi(pageSizeStr)
-	if err != nil {
-		return nil, err
+	log.Printf("serving catalog API at http://%s", server.Addr)
+	if err := listenAndServe(ctx, server, time.Second*5); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("serving catalog API: %w", err)
 	}
-	return &req, nil
-}
-
-func (h *catalogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.mux.ServeHTTP(w, r)
-}
-
-type PackageSummary struct {
-	Name             string       `json:"name"`
-	DisplayName      string       `json:"displayName"`
-	ShortDescription string       `json:"shortDescription"`
-	Provider         *Provider    `json:"provider"`
-	Maintainers      []Maintainer `json:"maintainers"`
-	Keywords         []string     `json:"keywords"`
-	SourceRepository *URL         `json:"sourceRepository"`
-	Deprecation      *Deprecation `json:"deprecation,omitempty"`
-}
-
-type PackageDetail struct {
-	PackageSummary
-	Description string         `json:"description"`
-	Metadata    map[string]any `json:"metadata"`
-}
-
-type Icon struct {
-	Data      []byte
-	MediaType string
-}
-
-type Provider struct {
-	Name string `json:"name"`
-	URL  *URL   `json:"url,omitempty"`
-}
-
-type Maintainer struct {
-	Name  string        `json:"name"`
-	Email *EmailAddress `json:"email,omitempty"`
-}
-
-type Deprecation struct {
-	Message string `json:"message"`
-}
-
-type URL struct{ url.URL }
-
-func ParseURL(value string) (*URL, error) {
-	parsed, err := url.ParseRequestURI(value)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return nil, fmt.Errorf("%q is not an HTTP URL", value)
-	}
-	return &URL{URL: *parsed}, nil
-}
-
-func (u URL) MarshalJSON() ([]byte, error) { return json.Marshal(u.String()) }
-
-func (u *URL) UnmarshalJSON(data []byte) error {
-	var value string
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
-	}
-	parsed, err := ParseURL(value)
-	if err != nil {
-		return err
-	}
-	*u = *parsed
 	return nil
 }
 
-type EmailAddress string
-
-func (e EmailAddress) String() string { return string(e) }
-
-func ParseEmailAddress(value string) (EmailAddress, error) {
-	address, err := mail.ParseAddress(value)
-	if err != nil || address.Address != value {
-		return "", fmt.Errorf("%q is not a valid email address", value)
-	}
-	return EmailAddress(value), nil
+type responseLogger struct {
+	http.ResponseWriter
+	status int
+	bytes  int
 }
 
-func (e *EmailAddress) UnmarshalJSON(data []byte) error {
-	var value string
-	if err := json.Unmarshal(data, &value); err != nil {
+func (w *responseLogger) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *responseLogger) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	n, err := w.ResponseWriter.Write(data)
+	w.bytes += n
+	return n, err
+}
+
+func (w *responseLogger) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		logged := &responseLogger{ResponseWriter: w}
+		next.ServeHTTP(logged, r)
+		status := logged.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		log.Printf("%s %s status=%d bytes=%d duration=%s", r.Method, r.URL.RequestURI(), status, logged.bytes, time.Since(start))
+	})
+}
+
+func listenAndServe(ctx context.Context, server *http.Server, shutdownTimeout time.Duration) error {
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- server.ListenAndServe()
+	}()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancelOrderlyShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancelOrderlyShutdown()
+		return server.Shutdown(shutdownCtx)
+	case err := <-serverErr:
 		return err
 	}
-	parsed, err := ParseEmailAddress(value)
-	if err != nil {
-		return err
-	}
-	*e = parsed
-	return nil
 }

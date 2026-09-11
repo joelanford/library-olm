@@ -44,6 +44,7 @@ bundle/                          — bundle types and transformations
     internal/                    — implementation details (render, validate, config)
   versionrelease.go              — version/release utilities
 catalog/                         — catalog API, persistent store, formats, and querying
+  http/                          — embeddable REST handler and OpenAPI contract
   v1/                            — catalog interfaces (Catalog, Store, Writer, Importer)
     sqlite/                      — SQLite-backed Store implementation (OpenStore)
     fbc/                         — FBC importer (public: Importer, NewImporter)

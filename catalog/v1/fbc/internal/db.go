@@ -95,8 +95,12 @@ var rawSchemaSQL = `
 -- Table names derived from FBC schema strings: replace "." with "_", prefix "raw_"
 
 CREATE TABLE ` + TableRawPackage + ` (
-    package_name TEXT NOT NULL PRIMARY KEY,
-    ext_data     JSON
+    package_name    TEXT NOT NULL PRIMARY KEY,
+    description     TEXT NOT NULL DEFAULT '',
+    icon_present    INTEGER NOT NULL DEFAULT 0,
+    icon_data       BLOB,
+    icon_media_type TEXT NOT NULL DEFAULT '',
+    ext_data        JSON
 );
 
 CREATE TABLE ` + TableRawChannel + ` (
@@ -122,6 +126,7 @@ CREATE TABLE ` + TableRawBundle + ` (
     version      TEXT NOT NULL,
     release      TEXT NOT NULL DEFAULT '',
     image        TEXT NOT NULL DEFAULT '',
+    csv_metadata JSON,
     ext_data     JSON,
     PRIMARY KEY (package_name, name)
 );

@@ -272,7 +272,7 @@ func getCatalog(q querier, readerDB *sql.DB, name string) (*storedCatalog, error
 		"SELECT uri, digest, priority FROM catalog_metadata WHERE name = ?", name,
 	).Scan(&uri, &digest, &priority)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("catalog %q not found", name)
+		return nil, fmt.Errorf("catalog %q: %w", name, catalogv1.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying catalog metadata: %w", err)
@@ -331,12 +331,15 @@ func (c *storedCatalog) Digest() string            { return c.digest }
 func (c *storedCatalog) Priority() int             { return c.priority }
 func (c *storedCatalog) Labels() map[string]string { return maps.Clone(c.labels) }
 
-func (c *storedCatalog) ListPackages(ctx context.Context) iter.Seq2[catalogv1.UpdateGraph, error] {
-	return queryGraphNodes(ctx, c.readerDB, c.name, nil, "", nil)
+func (c *storedCatalog) ListPackages(ctx context.Context) iter.Seq2[catalogv1.Package, error] {
+	return queryPackages(ctx, c.readerDB, c.name, "")
 }
 
-func (c *storedCatalog) GetPackage(ctx context.Context, name string) (catalogv1.UpdateGraph, error) {
-	return queryGraphNode(ctx, c.readerDB, c.name, nil, name, nil, fmt.Sprintf("package %q not found", name))
+func (c *storedCatalog) GetPackage(ctx context.Context, name string) (catalogv1.Package, error) {
+	for pkg, err := range queryPackages(ctx, c.readerDB, c.name, name) {
+		return pkg, err
+	}
+	return nil, fmt.Errorf("package %q in catalog %q: %w", name, c.name, catalogv1.ErrNotFound)
 }
 
 func (d *store) Select(selector labels.Selector) catalogv1.StoreReader {
@@ -354,7 +357,7 @@ func (s *selectedStore) Get(name string) (catalogv1.Catalog, error) {
 		return nil, err
 	}
 	if !s.selector.Matches(labels.Set(cat.Labels())) {
-		return nil, fmt.Errorf("catalog %q not found", name)
+		return nil, fmt.Errorf("catalog %q: %w", name, catalogv1.ErrNotFound)
 	}
 	return cat, nil
 }
@@ -386,6 +389,8 @@ func andSelector(a, b labels.Selector) labels.Selector {
 var _ catalogv1.Store = (*store)(nil)
 var _ catalogv1.StoreReader = (*selectedStore)(nil)
 var _ catalogv1.Catalog = (*storedCatalog)(nil)
+var _ catalogv1.Package = (*packageQuery)(nil)
+var _ catalogv1.Package = (*compositePackageQuery)(nil)
 var _ catalogv1.CompositeUpdateGraph = (*compositeGraphQuery)(nil)
 var _ catalogv1.UpdateGraph = (*graphQuery)(nil)
 var _ catalogv1.Writer = (*contentWriter)(nil)

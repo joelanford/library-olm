@@ -1,10 +1,12 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"iter"
 	"slices"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	internalproperty "github.com/joelanford/library-olm/catalog/v1/internal/property"
 )
 
 type deprecation struct{ message string }
@@ -31,6 +34,16 @@ type deprecatedCompositeUpdateGraph struct {
 
 type deprecatedBundle struct {
 	bundlev1.Bundle
+	deprecation
+}
+
+type deprecatedPackage struct {
+	*packageQuery
+	deprecation
+}
+
+type deprecatedCompositePackage struct {
+	*compositePackageQuery
 	deprecation
 }
 
@@ -63,6 +76,21 @@ func (b bundleRow) NameVersionRelease() bundlev1.NameVersionRelease {
 	return bundlev1.NameVersionRelease{Name: b.PackageName, Version: b.Version, Release: b.Release}
 }
 func (b bundleRow) URI() string { return b.BundleURI }
+
+func (b bundleRow) Metadata(ctx context.Context) (bundlev1.BundleMetadata, error) {
+	raw, err := b.Property(ctx, internalproperty.BundleMetadata)
+	if err != nil {
+		return bundlev1.BundleMetadata{}, err
+	}
+	if len(raw) == 0 {
+		return bundlev1.BundleMetadata{}, nil
+	}
+	var metadata bundlev1.BundleMetadata
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return bundlev1.BundleMetadata{}, fmt.Errorf("decoding bundle metadata: %w", err)
+	}
+	return metadata, nil
+}
 
 func (b bundleRow) Property(ctx context.Context, key string) (json.RawMessage, error) {
 	var val string
@@ -107,6 +135,66 @@ type compositeGraphQuery struct {
 	graphPath []string
 }
 
+type packageQuery struct {
+	graphQuery
+}
+
+func (p *packageQuery) Metadata(ctx context.Context) (catalogv1.PackageMetadata, error) {
+	return queryPackageMetadata(ctx, &p.graphQuery)
+}
+
+func queryPackageMetadata(ctx context.Context, graph *graphQuery) (catalogv1.PackageMetadata, error) {
+	raw, err := graph.Property(ctx, internalproperty.PackageMetadata)
+	if err != nil {
+		return catalogv1.PackageMetadata{}, err
+	}
+	if len(raw) == 0 {
+		return catalogv1.PackageMetadata{}, nil
+	}
+	var metadata catalogv1.PackageMetadata
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return catalogv1.PackageMetadata{}, fmt.Errorf("decoding package metadata: %w", err)
+	}
+	return metadata, nil
+}
+
+func (p *packageQuery) Icon(ctx context.Context) (catalogv1.Icon, error) {
+	return queryPackageIcon(ctx, &p.graphQuery)
+}
+
+func queryPackageIcon(ctx context.Context, graph *graphQuery) (catalogv1.Icon, error) {
+	raw, err := graph.Property(ctx, internalproperty.PackageIcon)
+	if err != nil {
+		return catalogv1.Icon{}, err
+	}
+	if len(raw) == 0 {
+		return catalogv1.Icon{}, nil
+	}
+	var stored struct {
+		Content   []byte
+		MediaType string
+	}
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return catalogv1.Icon{}, fmt.Errorf("decoding package icon: %w", err)
+	}
+	return catalogv1.Icon{
+		Content:   io.NopCloser(bytes.NewReader(stored.Content)),
+		MediaType: stored.MediaType,
+	}, nil
+}
+
+type compositePackageQuery struct {
+	compositeGraphQuery
+}
+
+func (p *compositePackageQuery) Metadata(ctx context.Context) (catalogv1.PackageMetadata, error) {
+	return queryPackageMetadata(ctx, &p.graphQuery)
+}
+
+func (p *compositePackageQuery) Icon(ctx context.Context) (catalogv1.Icon, error) {
+	return queryPackageIcon(ctx, &p.graphQuery)
+}
+
 func (g *compositeGraphQuery) ListBundles(ctx context.Context) iter.Seq2[bundlev1.Bundle, error] {
 	return queryBundlesDescendant(ctx, g.db, g.catalogName, g.graphID)
 }
@@ -120,7 +208,7 @@ func (g *compositeGraphQuery) ListGraphs(ctx context.Context) iter.Seq2[catalogv
 }
 
 func (g *compositeGraphQuery) GetGraph(ctx context.Context, name string) (catalogv1.UpdateGraph, error) {
-	return queryGraphNode(ctx, g.db, g.catalogName, &g.graphID, name, g.graphPath, fmt.Sprintf("graph %q not found in %s", name, strings.Join(g.graphPath, "/")))
+	return queryGraphNode(ctx, g.db, g.catalogName, &g.graphID, name, g.graphPath, fmt.Sprintf("graph %q in %s", name, strings.Join(g.graphPath, "/")))
 }
 
 func queryGraphProperty(ctx context.Context, db *sql.DB, graphID int64, key string) (json.RawMessage, error) {
@@ -155,6 +243,63 @@ func newCompositeGraphQuery(db *sql.DB, catalogName string, id int64, name strin
 		return &deprecatedCompositeUpdateGraph{CompositeUpdateGraph: cug, deprecation: deprecation{message: *deprecationMsg}}
 	}
 	return cug
+}
+
+func newPackageQuery(db *sql.DB, catalogName string, id int64, name string, hasChildren bool, deprecationMsg *string) catalogv1.Package {
+	if hasChildren {
+		pkg := &compositePackageQuery{compositeGraphQuery: compositeGraphQuery{
+			graphQuery: graphQuery{db: db, catalogName: catalogName, graphID: id, graphName: name},
+			graphPath:  []string{name},
+		}}
+		if deprecationMsg != nil {
+			return &deprecatedCompositePackage{compositePackageQuery: pkg, deprecation: deprecation{message: *deprecationMsg}}
+		}
+		return pkg
+	}
+	pkg := &packageQuery{graphQuery: graphQuery{db: db, catalogName: catalogName, graphID: id, graphName: name}}
+	if deprecationMsg != nil {
+		return &deprecatedPackage{packageQuery: pkg, deprecation: deprecation{message: *deprecationMsg}}
+	}
+	return pkg
+}
+
+func queryPackages(ctx context.Context, db *sql.DB, catalogName, name string) iter.Seq2[catalogv1.Package, error] {
+	args := []any{catalogName}
+	nameClause := ""
+	if name != "" {
+		nameClause = " AND g.name = ?"
+		args = append(args, name)
+	}
+	query := `SELECT g.id, g.name, g.deprecation_message, EXISTS(SELECT 1 FROM content_graphs c WHERE c.parent_id = g.id)
+		FROM content_graphs g
+		WHERE g.parent_id IS NULL AND g.catalog_name = ?` + nameClause + ` ORDER BY g.name`
+
+	return func(yield func(catalogv1.Package, error) bool) {
+		rows, err := db.QueryContext(ctx, query, args...)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var id int64
+			var packageName string
+			var deprecationMsg *string
+			var hasChildren bool
+			if err := rows.Scan(&id, &packageName, &deprecationMsg, &hasChildren); err != nil {
+				if !yield(nil, err) {
+					return
+				}
+				continue
+			}
+			if !yield(newPackageQuery(db, catalogName, id, packageName, hasChildren, deprecationMsg), nil) {
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
+		}
+	}
 }
 
 func queryGraphNodes(ctx context.Context, db *sql.DB, catalogName string, parentID *int64, name string, parentPath []string) iter.Seq2[catalogv1.UpdateGraph, error] {
@@ -210,7 +355,7 @@ func queryGraphNode(ctx context.Context, db *sql.DB, catalogName string, parentI
 	for ug, err := range queryGraphNodes(ctx, db, catalogName, parentID, name, parentPath) {
 		return ug, err
 	}
-	return nil, fmt.Errorf("%s", notFoundMsg)
+	return nil, fmt.Errorf("%s: %w", notFoundMsg, catalogv1.ErrNotFound)
 }
 
 func queryBundlesDirect(ctx context.Context, db *sql.DB, catalogName string, graphID int64) iter.Seq2[bundlev1.Bundle, error] {
@@ -268,8 +413,8 @@ func querySuccessorsDirect(ctx context.Context, db *sql.DB, catalogName string, 
 		`SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, b.deprecation_message
 		 FROM content_successors s
 		 JOIN content_bundles b ON b.id = s.to_bundle_id
-		 WHERE s.graph_id = ? AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE bundle_id = ?)`,
-		[]any{graphID, string(fromID)},
+		 WHERE s.graph_id = ? AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE catalog_name = ? AND bundle_id = ?)`,
+		[]any{graphID, catalogName, string(fromID)},
 		`SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, b.deprecation_message, pc.version_range
 		 FROM content_predecessor_ranges pc
 		 JOIN content_bundles b ON b.id = pc.bundle_id
@@ -291,8 +436,8 @@ func querySuccessorsDescendant(ctx context.Context, db *sql.DB, catalogName stri
 		FROM content_successors s
 		JOIN content_bundles b ON b.id = s.to_bundle_id
 		WHERE s.graph_id IN (SELECT id FROM descendants)
-		  AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE bundle_id = ?)`,
-		[]any{graphID, string(fromID)},
+		  AND s.from_bundle_id = (SELECT id FROM content_bundles WHERE catalog_name = ? AND bundle_id = ?)`,
+		[]any{graphID, catalogName, string(fromID)},
 		descendantCTE+`
 		SELECT b.bundle_id, b.package_name, b.version, b.release, b.uri, b.deprecation_message, pc.version_range
 		FROM content_predecessor_ranges pc

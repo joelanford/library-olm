@@ -3,6 +3,7 @@ package resolverv1
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"slices"
@@ -75,8 +76,23 @@ func PreferNonDeprecatedBundles() ResolveOption {
 // Result holds the output of a Resolve call.
 type Result struct {
 	Catalog catalogv1.Catalog
-	Package catalogv1.UpdateGraph
+	Package catalogv1.Package
 	Bundles []bundlev1.Bundle
+}
+
+// AmbiguousPackageError reports package matches in multiple catalogs at the
+// selected priority. Catalogs is sorted by catalog name.
+type AmbiguousPackageError struct {
+	Package  string
+	Priority int
+	Catalogs []string
+}
+
+func (e *AmbiguousPackageError) Error() string {
+	return fmt.Sprintf(
+		"ambiguous: package %q found in multiple catalogs at priority %d: %v",
+		e.Package, e.Priority, e.Catalogs,
+	)
 }
 
 // Resolve finds bundles matching the given criteria across all catalogs in the
@@ -120,20 +136,31 @@ func Resolve(ctx context.Context, reader catalogv1.StoreReader, packageName stri
 	return &Result{Catalog: cat, Package: pkg, Bundles: bundles}, nil
 }
 
-func selectPackage(ctx context.Context, catalogs []catalogv1.Catalog, packageName string) (catalogv1.Catalog, catalogv1.UpdateGraph, error) {
+func selectPackage(ctx context.Context, catalogs []catalogv1.Catalog, packageName string) (catalogv1.Catalog, catalogv1.Package, error) {
 	groups := groupByPriority(catalogs)
 	for _, group := range groups {
 		type match struct {
 			catalog catalogv1.Catalog
-			pkg     catalogv1.UpdateGraph
+			pkg     catalogv1.Package
 		}
 		var matches []match
+		var readErrs []error
 		for _, cat := range group {
 			pkg, err := cat.GetPackage(ctx, packageName)
 			if err != nil {
+				if errors.Is(err, catalogv1.ErrNotFound) {
+					continue
+				}
+				readErrs = append(readErrs, fmt.Errorf("reading catalog %q: %w", cat.Name(), err))
 				continue
 			}
 			matches = append(matches, match{catalog: cat, pkg: pkg})
+		}
+		if len(readErrs) != 0 {
+			return nil, nil, fmt.Errorf(
+				"getting package %q from catalogs at priority %d: %w",
+				packageName, group[0].Priority(), errors.Join(readErrs...),
+			)
 		}
 		if len(matches) == 0 {
 			continue
@@ -146,10 +173,11 @@ func selectPackage(ctx context.Context, catalogs []catalogv1.Catalog, packageNam
 			names[i] = m.catalog.Name()
 		}
 		slices.Sort(names)
-		return nil, nil, fmt.Errorf(
-			"ambiguous: package %q found in multiple catalogs at priority %d: %v",
-			packageName, group[0].Priority(), names,
-		)
+		return nil, nil, &AmbiguousPackageError{
+			Package:  packageName,
+			Priority: group[0].Priority(),
+			Catalogs: names,
+		}
 	}
 	return nil, nil, nil
 }
@@ -202,7 +230,10 @@ func walkPath(ctx context.Context, root catalogv1.UpdateGraph, path []string) (c
 		}
 		g, err := composite.GetGraph(ctx, name)
 		if err != nil {
-			return nil, nil
+			if errors.Is(err, catalogv1.ErrNotFound) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("getting graph %q: %w", name, err)
 		}
 		current = g
 	}
@@ -247,7 +278,10 @@ func sortBundles(bundles []bundlev1.Bundle, preferNonDeprecated bool) {
 }
 
 func cmpVersionDesc(a, b bundlev1.Bundle) int {
-	return b.NameVersionRelease().Compare(a.NameVersionRelease())
+	if c := b.NameVersionRelease().Compare(a.NameVersionRelease()); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.ID(), b.ID())
 }
 
 func cmpDeprecation(a, b bundlev1.Bundle) int {
