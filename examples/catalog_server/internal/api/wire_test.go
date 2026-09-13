@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"context"
@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
-	testutil "github.com/joelanford/library-olm/internal/util/test"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
+	testutil "github.com/joelanford/library-olm/examples/catalog_server/internal/testutil"
 )
 
 type deprecatedPackage struct {
@@ -24,11 +24,11 @@ func (p *deprecatedPackage) DeprecationMessage() string { return p.message }
 func TestWireProjection(t *testing.T) {
 	t.Parallel()
 
-	providerURL, err := catalogv1.ParseURL("https://provider.example.com")
+	providerURL, err := model.ParseURL("https://provider.example.com")
 	require.NoError(t, err)
-	sourceURL, err := catalogv1.ParseURL("https://source.example.com/repo")
+	sourceURL, err := model.ParseURL("https://source.example.com/repo")
 	require.NoError(t, err)
-	email, err := catalogv1.ParseEmailAddress("maintainer@example.com")
+	email, err := model.ParseEmailAddress("maintainer@example.com")
 	require.NoError(t, err)
 
 	catalog := &testutil.Catalog{
@@ -41,12 +41,12 @@ func TestWireProjection(t *testing.T) {
 	pkg := &deprecatedPackage{
 		Package: &testutil.Package{
 			LeafGraph: &testutil.LeafGraph{GraphName: "cert manager"},
-			PackageMetadata: catalogv1.PackageMetadata{
+			PackageMetadata: model.PackageMetadata{
 				DisplayName:      "Certificate Manager",
 				ShortDescription: "Manages certificates",
 				Description:      "A complete description",
-				Provider:         catalogv1.Provider{Name: "Provider", URL: &providerURL},
-				Maintainers:      []catalogv1.Maintainer{{Name: "Maintainer", Email: &email}},
+				Provider:         model.Provider{Name: "Provider", URL: &providerURL},
+				Maintainers:      []model.Maintainer{{Name: "Maintainer", Email: &email}},
 				Keywords:         []string{"certificates", "security"},
 				SourceRepository: &sourceURL,
 				IconAvailable:    true,
@@ -93,7 +93,7 @@ func TestBundleProjection(t *testing.T) {
 	timestamp := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
 	bundle := testutil.NewBundle(t, "package", "1.2.3", "4")
 	bundle.BundleURI = "oci://bundle"
-	bundle.BundleMetadata = bundlev1.BundleMetadata{MediaType: "application/vnd.example", ReleaseTimestamp: &timestamp}
+	bundle.BundleMetadata = model.BundleMetadata{MediaType: "registry+v1", ReleaseTimestamp: &timestamp}
 
 	detail, err := bundleDetailFrom(context.Background(), "", "catalog", "package", bundle)
 	require.NoError(t, err)
@@ -101,7 +101,7 @@ func TestBundleProjection(t *testing.T) {
 	assert.Equal(t, "1.2.3", detail.Version)
 	assert.Equal(t, "4", detail.Release)
 	assert.Equal(t, "oci://bundle", detail.URI)
-	assert.Equal(t, "application/vnd.example", detail.MediaType)
+	assert.Equal(t, "registry+v1", detail.MediaType)
 	assert.Equal(t, timestamp, *detail.ReleaseTimestamp)
 	assert.Equal(t, "/v1/catalogs/catalog/packages/package/bundles/package.v1.2.3-4", detail.Links.Self.Href)
 }
@@ -138,5 +138,5 @@ func TestRequiredCollectionsMarshalAsArrays(t *testing.T) {
 	}
 }
 
-var _ catalogv1.Package = (*deprecatedPackage)(nil)
+var _ catalogv1.UpdateGraph = (*deprecatedPackage)(nil)
 var _ catalogv1.Deprecated = (*deprecatedPackage)(nil)

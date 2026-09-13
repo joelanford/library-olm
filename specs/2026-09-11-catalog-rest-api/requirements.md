@@ -1,140 +1,148 @@
 # Requirements
 
-- Provide a public `catalog/http` package whose constructor accepts a
-  `catalogv1.StoreReader` and returns an `http.Handler` without starting or
-  configuring an HTTP server.
-- Use module semantic versioning for the Go API and retain `/v1` only as the
-  independent HTTP wire-contract version.
+## Module And Ownership
+
+- Implement the catalog server as a nested Go module at
+  `examples/catalog_server`.
+- Keep the HTTP handler, `/v1` wire models, OpenAPI contract, portable metadata
+  model, metadata validation, namespaced property keys, property decoding, and
+  executable server composition inside the nested module.
+- Use module semantic versioning for the nested Go API and `/v1` only for the
+  HTTP wire-contract version.
+- Accept a `catalogv1.StoreReader` at the handler boundary so callers can mount
+  the handler and set the outer catalog policy boundary.
+- Keep server lifecycle, listen address, logging, and shutdown in the example
+  application rather than the root library.
+- Do not add `catalog/http` or another HTTP/OpenAPI package to the root module.
+- Do not add `catalogv1.Package`, package metadata, bundle metadata, icon,
+  metadata validation, or metadata property-key APIs to the core library.
+- Do not mention examples in root `CLAUDE.md` or `specs/tech-stack.md`.
+- Do not add a nested CI workflow, root Makefile target, workspace file, or other
+  CI infrastructure for the nested module.
+
+## Metadata Adaptation
+
+- Define portable package and bundle presentation types in the nested module.
+  They may include display name, descriptions, provider, maintainers, keywords,
+  source repository, icon content and media type, bundle media type, and bundle
+  release timestamp as required by the wire contract.
+- Keep validation for URLs, email addresses, media types, timestamps, and other
+  presentation values in the nested module.
+- Define stable, namespaced graph and bundle property keys in the nested module.
+- Decode portable metadata through the existing `UpdateGraph.Property` and
+  `Bundle.Property` methods. Treat a missing optional property as absence and a
+  malformed property as an error.
+- Implement an `fbc.OLMPackageExtension` in the nested module. Use its per-blob
+  callbacks and package accessor to collect legacy FBC metadata, and use its
+  `PropertyWriter` during `FinalizePackage` to write package graph, icon, and
+  bundle properties under the nested module's namespaced keys.
+- Keep operator-registry and FBC source types behind the extension boundary;
+  do not expose them in portable metadata or HTTP wire types.
+- Preserve normal FBC import and SQLite behavior when the extension is not
+  registered. Generic storage must not interpret the example's property keys.
+- Preserve existing `FinalizePackage` partial-import behavior. A finalization
+  error remains a per-package partial import error and does not introduce a new
+  per-package rollback guarantee.
+- Do not implement per-package atomic finalization or enforce uniqueness of
+  bundle name/version/release identities.
+- Do not change existing SQLite successor lookup behavior when separate catalogs
+  reuse a bundle ID.
+
+## Core Errors And Resolver
+
+- Define `catalogv1.ErrNotFound` as the shared classification for lookup
+  absence, with implementations wrapping it with operation and resource
+  context.
+- Make `StoreReader.Get` wrap `catalogv1.ErrNotFound` when a catalog is absent
+  or hidden by the selected reader.
+- Make `Catalog.GetPackage` wrap `catalogv1.ErrNotFound` when a package is
+  absent.
+- Make `CompositeUpdateGraph.GetGraph` wrap `catalogv1.ErrNotFound` when a child
+  graph is absent.
+- Do not use `ErrNotFound` for optional property absence, empty collections, or
+  iterator completion.
+- Make resolver package and graph lookup ignore only errors matching
+  `catalogv1.ErrNotFound` and propagate every other read error with context.
+- Evaluate package selection in complete descending-priority groups. Continue
+  only if all catalogs in a group report absence, return a unique match, and do
+  not read lower-priority package content after selection.
+- Return a typed `resolverv1.AmbiguousPackageError` when more than one catalog
+  at the selected priority contains the package. Include the package, priority,
+  and deterministically sorted catalog names.
+- Retain existing resolver sorting by name/version/release and optional
+  deprecation preference. Revert and do not add bundle ID as an equal-identity
+  tie-break.
+
+## HTTP Contract
+
 - Serve catalog, package, channel, bundle, icon, and recommendation resources
-  beneath `/v1` as defined in the design and checked-in OpenAPI contract.
-- Allow cross-catalog requests to narrow the handler's base reader with the
-  standard Kubernetes label selector syntax. Omission selects every catalog
-  visible through the base reader.
-- Return every catalog-scoped occurrence from package discovery. Sort package
-  occurrences by package name ascending, catalog priority descending, then
-  catalog name ascending.
-- Represent every nested child update graph as a channel and identify it with
-  an ordered path of graph-name segments. Encode resource URL paths as one
-  colon-delimited path parameter while retaining segment arrays in JSON and the
-  domain model; reject colons within individual graph-name segments.
-- Provide separate package-level and channel-level bundle collection endpoints.
-  Package-level listing uses the package root graph; channel-level listing uses
-  the addressed graph. Composite graph listings include bundles from all
-  descendants according to `UpdateGraph.ListBundles`.
-- Do not accept channel paths on bundle collection endpoints. Clients querying
-  several specific channels make separate requests, each with its own cursor
-  and limit.
-- Add a `catalogv1.Package` interface for package-root graph behavior, typed
-  package metadata, and lazy icon access. Change catalog package queries to
-  return this interface.
-- Add typed bundle metadata for optional media type and release timestamp while
-  retaining existing bundle identity and URI methods.
-- Preserve `catalogv1.Deprecated` as the format-neutral source of package,
-  channel, and bundle deprecation messages.
-- Define an extensible concrete icon result type whose initial fields provide
-  streamable content and its media type. Do not make the result a closed source
-  enumeration or otherwise prevent adding an icon location later.
-- Stream available icon content with its declared media type and return not
-  found when no icon exists.
-- Populate all portable metadata available from legacy FBC during import, and
-  make it available through the typed core interfaces.
-- Do not expose FBC types, raw catalog properties, vendor-specific attributes,
-  or catalog-v2 types in the core metadata or HTTP wire models.
+  beneath `/v1` as described in the design and checked-in OpenAPI contract.
+- Allow cross-catalog requests to narrow the handler's base reader with standard
+  Kubernetes label selector syntax. Omission selects every catalog visible
+  through the base reader.
+- Return every catalog-scoped package occurrence from package discovery. Sort by
+  package name ascending, catalog priority descending, then catalog name
+  ascending.
+- Represent every nested child update graph as a channel. Use ordered segment
+  arrays in JSON and one colon-delimited URL parameter; reject colons within a
+  graph-name segment and impose no fixed nesting depth on the core model.
+- Provide separate package-level and channel-level bundle collections. Invoke
+  `ListBundles` on the addressed graph and preserve composite graph semantics.
+- Do not accept channel paths as query parameters on bundle collections.
+- Stream icon content decoded from the package graph property with its declared
+  media type. Return not found when the icon property is absent.
 - Accept recommendation requests at
-  `POST /v1/recommendations/{package}`. Accept catalog selector, cursor, and
-  limit as query parameters. Accept optional current bundle identity, channel
-  paths, semantic-version constraint, and upgrade constraint policy in the JSON
-  body.
-- Use the same catalog selector query parameter and Kubernetes selector syntax
-  for `GET /v1/packages` and recommendation requests.
-- Require a client continuing a recommendation collection to repeat the same
-  JSON body, and bind its cursor to that body and the catalog selector.
-- Define local HTTP `CatalogProvided` and `SelfCertified` upgrade constraint
-  policy values, defaulting omitted policy to `CatalogProvided`.
-- For `CatalogProvided` upgrades, return only immediate candidates supplied by
-  the selected update graphs by supplying the resolver's existing
-  `WithSuccessorsOf` option. For `SelfCertified`, omit that option to ignore
-  graph edges and rank all bundles satisfying the remaining request constraints.
-- Preserve the canonical resolver's candidate order in the response and do not
-  rerank or construct multi-hop paths in the HTTP package. Keep the ordered-list
-  response compatible with a future core graph/resolver API change for
-  format-aware edge weighting or shortest-path recommendation behavior.
-- Prefer non-deprecated recommendation candidates while retaining deprecated
-  candidates after them.
-- Evaluate recommendation catalogs in descending priority groups. Within each
-  group, check every catalog for the package, fail on any read error, return an
-  ambiguity problem for multiple matches, select exactly one match, or continue
-  when there are no matches.
-- Stop probing package content after selecting a package occurrence; unreadable
-  catalogs in lower-priority groups must not affect that recommendation.
-- Distinguish package absence from catalog read failures. Discovery operations
-  that aggregate selected catalogs fail when a catalog required for that result
-  is unreadable.
-- Use stateless opaque cursors for all collections, with a default limit of 50
-  and maximum limit of 200.
-- Keep cursors compact by storing hashes of normalized request inputs and the
-  selected catalog snapshot rather than embedding the full inputs or snapshot.
-  Build the catalog snapshot hash from a canonical catalog-name-sorted sequence
-  containing every selected catalog's name, labels, digest, and priority, with
-  label keys sorted. Reject changed snapshots as stale rather than silently
-  continuing.
-- Treat cursor encoding as an implementation detail with no required version
-  field or compatibility guarantee across handler upgrades. Reject an
-  undecodable cursor and require the client to restart from the first page.
-- Return errors as RFC 9457 `application/problem+json` documents with stable
-  problem types and appropriate HTTP status codes.
-- Maintain a checked-in, spec-first OpenAPI YAML document and tests that verify
-  handler behavior and representative schemas against it.
-- Test each behavior exhaustively in its owning package. Use fake
-  `catalogv1.StoreReader` and domain values for handler tests, without SQLite or
-  FBC fixtures, and do not duplicate catalog-store or resolver behavior matrices
-  through the HTTP layer.
-- Keep catalog-domain test fakes shared by resolver and HTTP tests in
-  `internal/util/test`; keep HTTP request, response, Problem Details, OpenAPI,
-  and stream helpers local to `catalog/http` tests.
-- Replace `examples/catalog_server` with a working example that composes the
-  SQLite store and public handler while keeping server lifecycle in example
-  application code.
-- Do not add a CLI, Kubernetes client, controller-runtime dependency,
-  operator-controller API dependency, or HTTP framework dependency.
+  `POST /v1/recommendations/{package}`. Accept selector, cursor, and limit in the
+  query and current bundle, channel paths, version constraint, and policy in the
+  JSON body.
+- Define `CatalogProvided` and `SelfCertified` policy values in the nested
+  module, defaulting omission to `CatalogProvided`.
+- Map catalog-provided upgrades to the existing `WithSuccessorsOf` resolver
+  option and self-certified recommendations to its omission.
+- Preserve resolver candidate order in recommendation responses. Do not add an
+  HTTP rerank, multi-hop path computation, or bundle ID tie-break.
+- Use stateless opaque cursors for collections, with a default limit of 50 and a
+  maximum of 200.
+- Bind cursors to normalized request inputs and a canonical hash of all selected
+  catalog names, labels, digests, and priorities. Reject changed snapshots as
+  stale and undecodable tokens as invalid.
+- Return RFC 9457 `application/problem+json` responses with stable types for
+  validation, unsupported policy, not found, ambiguity, invalid or stale cursor,
+  method, and internal read or metadata errors.
+- Complete reads needed for a success response before writing headers, except
+  that an icon stream error after headers are sent terminates the response.
+- Maintain a checked-in, spec-first OpenAPI YAML document in the nested module
+  and test representative handler behavior against it.
+- Do not add an HTTP framework, Kubernetes client, controller-runtime,
+  operator-controller API, or catalog-v2 dependency.
 
 ## Acceptance Criteria
 
-- A consumer can construct and mount the handler with any conforming
-  `catalogv1.StoreReader`.
-- Catalog and package collection requests honor valid label selectors and
-  reject invalid selectors with a typed validation problem.
-- Package discovery returns duplicate names as separate catalog-scoped items in
-  the specified deterministic order.
-- Package detail exposes the portable FBC presentation fields, channel
-  responses preserve arbitrary nesting as path arrays, and bundle responses
-  expose identity plus available release metadata.
-- Package and channel bundle endpoints return their respective graph views, and
-  a composite graph includes the union of bundles from its descendants.
-- Fake package icon content is streamed with its declared content type, and
-  absent icons return a not-found problem.
-- Install recommendation without a current bundle returns resolver-ranked
-  candidates from the selected catalog and requested channels and versions.
-- Catalog-provided upgrade recommendation returns immediate successors only;
-  self-certified recommendation ignores update edges while preserving all
-  other filters.
-- Equal-priority package matches produce an ambiguity problem, and a catalog
-  selector can narrow the request to a lower-priority catalog.
-- A read error in the priority group currently checked by recommendation fails
-  the request, while lower-priority package reads are not attempted after a
-  higher-priority match is selected.
-- A missing package yields not found, while an unreadable catalog required by a
-  discovery operation fails that operation.
-- Collection continuation returns the next deterministic page without
-  server-side session state, and catalog replacement causes the old cursor to
-  return a stale-cursor conflict.
-- Malformed JSON, invalid limits, invalid channel paths, invalid semantic
-  constraints, unsupported policies, missing resources, invalid or stale cursors,
-  ambiguity, and internal failures have documented Problem Details responses.
-- The checked-in OpenAPI document describes every endpoint, parameter, request,
-  success response, redirect, content type, and error response implemented by
-  the handler.
-- The example builds and demonstrates mounting the handler, but no production
-  package calls `http.ListenAndServe`.
-- New and changed code has tests, new code reaches at least 70 percent statement
-  coverage, overall coverage does not decrease, and `make ci` passes.
+- The nested module builds and its tests pass independently while importing the
+  root module as a normal consumer.
+- A caller can construct the handler with a conforming `StoreReader`, and the
+  executable can import FBC with the nested module's extension and mount the
+  handler.
+- Portable metadata and icons are written only under nested-module-owned
+  namespaced properties and are decoded into the documented wire responses.
+- Importing the same FBC without the extension retains normal core FBC and
+  SQLite behavior.
+- Finalization failures retain existing partial-import behavior; no test or
+  contract promises per-package atomicity.
+- Missing catalogs, packages, and child graphs satisfy
+  `errors.Is(err, catalogv1.ErrNotFound)` while other read failures remain
+  distinguishable and propagate through the resolver.
+- Equal-priority matches produce a typed `AmbiguousPackageError`, and a unique
+  higher-priority match prevents lower-priority package reads.
+- Equal name/version/release candidates are not ordered by a newly introduced
+  bundle ID tie-break, and no uniqueness enforcement is added.
+- Package discovery preserves duplicate names as catalog-scoped results, nested
+  channel paths round-trip, package and channel graph views remain distinct,
+  and icon absence returns the documented not-found problem.
+- Catalog-provided upgrades use immediate successors, self-certified
+  recommendations ignore graph edges, and both preserve resolver order.
+- Pagination, selector validation, Problem Details responses, and representative
+  schemas match the OpenAPI contract.
+- Root checks pass without root documentation or CI configuration referring to
+  `examples/catalog_server`; nested-module checks are run directly rather than
+  through new CI infrastructure.

@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"encoding/base64"
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
-	testutil "github.com/joelanford/library-olm/internal/util/test"
+	testutil "github.com/joelanford/library-olm/examples/catalog_server/internal/testutil"
 )
 
 func TestCursorCompactShapeAndRoundTrip(t *testing.T) {

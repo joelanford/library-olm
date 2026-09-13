@@ -24,7 +24,7 @@ import (
 // produced by the FBC fixture below. When the content schema or FBC import
 // logic changes, this test will fail. Update contentSchemaVersion in
 // catalog/v1/sqlite/content.go and refresh this constant.
-const expectedFingerprint = "1d76555ae520b0f1a205dc57bf4db9cadb0cc89e5b22726a984857c896bd8021"
+const expectedFingerprint = "89a2dc4492b3d61553100e5e60f4edc23d1395dd066aa6f36259e88ceea6f2d0"
 
 func TestContentFingerprint(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "fp.db")

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const contentSchemaVersion = 7
+const contentSchemaVersion = 6
 
 const contentSchemaSQL = `
 CREATE TABLE content_schema_version (

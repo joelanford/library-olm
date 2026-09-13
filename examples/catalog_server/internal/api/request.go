@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"bytes"
@@ -205,7 +205,12 @@ func decodeRecommendationRequest(r *http.Request, packageName string, request *r
 			return &problem
 		}
 		for _, name := range []string{"id", "packageName", "version", "release"} {
-			if value, ok := identityFields[name]; ok && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			value, ok := identityFields[name]
+			if !ok {
+				problem := newProblem(problemMalformedInput, invalidParam("currentBundle."+name, "is required"))
+				return &problem
+			}
+			if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 				problem := newProblem(problemMalformedInput, invalidParam("currentBundle."+name, "must not be null"))
 				return &problem
 			}

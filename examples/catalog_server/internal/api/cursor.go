@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"bytes"

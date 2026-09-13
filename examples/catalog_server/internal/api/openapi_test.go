@@ -1,7 +1,6 @@
-package cataloghttp
+package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,7 +18,8 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
-	testutil "github.com/joelanford/library-olm/internal/util/test"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
+	testutil "github.com/joelanford/library-olm/examples/catalog_server/internal/testutil"
 )
 
 const openAPIPath = "openapi.yaml"
@@ -278,15 +278,15 @@ func contractHandler(t *testing.T) http.Handler {
 	timestamp := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
 	bundle := testutil.NewBundle(t, "package", "1.2.3", "")
 	bundle.BundleURI = "oci://example/package:1.2.3"
-	bundle.BundleMetadata = bundlev1.BundleMetadata{MediaType: "application/vnd.example.bundle", ReleaseTimestamp: &timestamp}
+	bundle.BundleMetadata = model.BundleMetadata{MediaType: "registry+v1", ReleaseTimestamp: &timestamp}
 	channel := &testutil.LeafGraph{GraphName: "stable", Bundles: []bundlev1.Bundle{bundle}}
 	pkg := &testutil.CompositePackage{
 		CompositeGraph: &testutil.CompositeGraph{
 			LeafGraph: &testutil.LeafGraph{GraphName: "package", Bundles: []bundlev1.Bundle{bundle}},
 			Graphs:    map[string]catalogv1.UpdateGraph{"stable": channel},
 		},
-		PackageMetadata: catalogv1.PackageMetadata{DisplayName: "Package", Provider: catalogv1.Provider{Name: "Provider"}, IconAvailable: true},
-		PackageIcon:     catalogv1.Icon{Content: io.NopCloser(bytes.NewBufferString("icon bytes")), MediaType: "image/png"},
+		PackageMetadata: model.PackageMetadata{DisplayName: "Package", Provider: model.Provider{Name: "Provider"}, IconAvailable: true},
+		PackageIcon:     model.Icon{Content: []byte("icon bytes"), MediaType: "image/png"},
 	}
 	catalog := &testutil.Catalog{
 		CatalogName:     "catalog",
@@ -294,7 +294,7 @@ func contractHandler(t *testing.T) http.Handler {
 		CatalogDigest:   "sha256:1234",
 		CatalogPriority: 10,
 		CatalogLabels:   map[string]string{"env": "test"},
-		Packages:        map[string]catalogv1.Package{"package": pkg},
+		Packages:        map[string]catalogv1.UpdateGraph{"package": pkg},
 	}
 	return NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{catalog}})
 }
@@ -303,8 +303,8 @@ func ambiguousContractReader() *testutil.StoreReader {
 	packageA := &testutil.Package{LeafGraph: &testutil.LeafGraph{GraphName: "package"}}
 	packageB := &testutil.Package{LeafGraph: &testutil.LeafGraph{GraphName: "package"}}
 	return &testutil.StoreReader{Catalogs: []catalogv1.Catalog{
-		&testutil.Catalog{CatalogName: "a", Packages: map[string]catalogv1.Package{"package": packageA}},
-		&testutil.Catalog{CatalogName: "b", Packages: map[string]catalogv1.Package{"package": packageB}},
+		&testutil.Catalog{CatalogName: "a", Packages: map[string]catalogv1.UpdateGraph{"package": packageA}},
+		&testutil.Catalog{CatalogName: "b", Packages: map[string]catalogv1.UpdateGraph{"package": packageB}},
 	}}
 }
 

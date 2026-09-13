@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
-	testutil "github.com/joelanford/library-olm/internal/util/test"
+	testutil "github.com/joelanford/library-olm/examples/catalog_server/internal/testutil"
 )
 
 func TestParseCollectionRequest(t *testing.T) {
@@ -135,6 +135,7 @@ func TestDecodeRecommendationRequestValidation(t *testing.T) {
 		{name: "invalid constraint", body: `{"versionConstraint":"not a constraint"}`, kind: &problemInvalidVersionConstraint},
 		{name: "null request", body: `null`, kind: &problemMalformedInput},
 		{name: "null current bundle", body: `{"currentBundle":null}`, kind: &problemMalformedInput},
+		{name: "missing current bundle release", body: `{"currentBundle":{"id":"p.v1.0.0","packageName":"p","version":"1.0.0"}}`, kind: &problemMalformedInput},
 		{name: "null current bundle release", body: `{"currentBundle":{"id":"p.v1.0.0","packageName":"p","version":"1.0.0","release":null}}`, kind: &problemMalformedInput},
 		{name: "null channel paths", body: `{"channelPaths":null}`, kind: &problemMalformedInput},
 		{name: "null version constraint", body: `{"versionConstraint":null}`, kind: &problemMalformedInput},

@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
 )
 
 type resourceLink struct {
@@ -207,7 +208,7 @@ func catalogDetailFrom(prefix string, catalog catalogv1.Catalog) catalogDetail {
 	}
 }
 
-func packageSummaryFrom(prefix string, catalog catalogv1.Catalog, pkg catalogv1.Package, metadata catalogv1.PackageMetadata) packageSummary {
+func packageSummaryFrom(prefix string, catalog catalogv1.Catalog, pkg catalogv1.UpdateGraph, metadata model.PackageMetadata) packageSummary {
 	self := packagePath(catalog.Name(), pkg.Name())
 	return packageSummary{
 		CatalogName:        catalog.Name(),
@@ -225,7 +226,7 @@ func packageSummaryFrom(prefix string, catalog catalogv1.Catalog, pkg catalogv1.
 	}
 }
 
-func packageDetailFrom(prefix string, catalog catalogv1.Catalog, pkg catalogv1.Package, metadata catalogv1.PackageMetadata) packageDetail {
+func packageDetailFrom(prefix string, catalog catalogv1.Catalog, pkg catalogv1.UpdateGraph, metadata model.PackageMetadata) packageDetail {
 	self := packagePath(catalog.Name(), pkg.Name())
 	maintainers := make([]maintainer, 0, len(metadata.Maintainers))
 	for _, value := range metadata.Maintainers {
@@ -297,7 +298,7 @@ func bundleSummaryFrom(prefix, catalogName, packageName string, bundle bundlev1.
 }
 
 func bundleDetailFrom(ctx context.Context, prefix, catalogName, packageName string, bundle bundlev1.Bundle) (bundleDetail, error) {
-	metadata, err := bundle.Metadata(ctx)
+	metadata, err := model.BundleMetadataFrom(ctx, bundle)
 	if err != nil {
 		return bundleDetail{}, err
 	}
@@ -320,11 +321,11 @@ func bundleDetailFrom(ctx context.Context, prefix, catalogName, packageName stri
 	}, nil
 }
 
-func providerFrom(value catalogv1.Provider) provider {
+func providerFrom(value model.Provider) provider {
 	return provider{Name: value.Name, URL: stringFromURL(value.URL)}
 }
 
-func maintainerFrom(value catalogv1.Maintainer) maintainer {
+func maintainerFrom(value model.Maintainer) maintainer {
 	result := maintainer{Name: value.Name}
 	if value.Email != nil {
 		email := value.Email.String()
@@ -333,7 +334,7 @@ func maintainerFrom(value catalogv1.Maintainer) maintainer {
 	return result
 }
 
-func stringFromURL(value *catalogv1.URL) *string {
+func stringFromURL(value *model.URL) *string {
 	if value == nil {
 		return nil
 	}

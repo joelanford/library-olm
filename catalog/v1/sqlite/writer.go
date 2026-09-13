@@ -11,7 +11,7 @@ import (
 
 func graphPath(path []string) (string, error) {
 	for _, seg := range path {
-		if seg == "" || strings.ContainsAny(seg, "/:") {
+		if seg == "" || strings.Contains(seg, "/") {
 			return "", fmt.Errorf("invalid graph path segment %q", seg)
 		}
 	}

@@ -3,10 +3,10 @@ info:
   title: library-olm Catalog API
   version: 1.0.0
   description: |
-    The authoritative wire contract for the embeddable library-olm catalog HTTP
-    handler. The `/v1` prefix versions this HTTP contract independently of the
-    Go package. Authentication, authorization, and server lifecycle are owned by
-    the application mounting the handler.
+    The authoritative wire contract for the example catalog server's embeddable
+    HTTP handler. The `/v1` prefix versions this HTTP contract independently of
+    the Go package. Authentication, authorization, and server lifecycle are
+    owned by the application mounting the handler.
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
   - url: /v1

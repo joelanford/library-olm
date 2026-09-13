@@ -32,7 +32,7 @@ func (a *PackageAccessor) ExtData() (json.RawMessage, error) {
 func (a *PackageAccessor) Bundles() iter.Seq2[BundleAccessor, error] {
 	return func(yield func(BundleAccessor, error) bool) {
 		rows, err := a.db.Query(
-			"SELECT name, package_name, version, release, image, csv_metadata, ext_data FROM "+TableRawBundle+" WHERE package_name = ?",
+			"SELECT name, package_name, version, release, image, ext_data FROM "+TableRawBundle+" WHERE package_name = ?",
 			a.packageName,
 		)
 		if err != nil {
@@ -42,7 +42,7 @@ func (a *PackageAccessor) Bundles() iter.Seq2[BundleAccessor, error] {
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var b bundleAccessor
-			if err := rows.Scan(&b.name, &b.pkg, &b.version, &b.release, &b.image, &b.csvMetadata, &b.extData); err != nil {
+			if err := rows.Scan(&b.name, &b.pkg, &b.version, &b.release, &b.image, &b.extData); err != nil {
 				if !yield(nil, err) {
 					return
 				}
@@ -172,27 +172,24 @@ type BundleAccessor = interface {
 	Version() string
 	Release() string
 	Image() string
-	CSVMetadata() json.RawMessage
 	ExtData() json.RawMessage
 }
 
 type bundleAccessor struct {
-	name        string
-	pkg         string
-	version     string
-	release     string
-	image       string
-	csvMetadata nullRawMessage
-	extData     nullRawMessage
+	name    string
+	pkg     string
+	version string
+	release string
+	image   string
+	extData nullRawMessage
 }
 
-func (b *bundleAccessor) Name() string                 { return b.name }
-func (b *bundleAccessor) Package() string              { return b.pkg }
-func (b *bundleAccessor) Version() string              { return b.version }
-func (b *bundleAccessor) Release() string              { return b.release }
-func (b *bundleAccessor) Image() string                { return b.image }
-func (b *bundleAccessor) CSVMetadata() json.RawMessage { return json.RawMessage(b.csvMetadata) }
-func (b *bundleAccessor) ExtData() json.RawMessage     { return json.RawMessage(b.extData) }
+func (b *bundleAccessor) Name() string             { return b.name }
+func (b *bundleAccessor) Package() string          { return b.pkg }
+func (b *bundleAccessor) Version() string          { return b.version }
+func (b *bundleAccessor) Release() string          { return b.release }
+func (b *bundleAccessor) Image() string            { return b.image }
+func (b *bundleAccessor) ExtData() json.RawMessage { return json.RawMessage(b.extData) }
 
 type ChannelAccessor = interface {
 	Name() string

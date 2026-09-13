@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"errors"
@@ -12,6 +12,7 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
 	resolverv1 "github.com/joelanford/library-olm/resolver/v1"
 )
 
@@ -111,7 +112,7 @@ func (h *handler) recommend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metadata, err := result.Package.Metadata(r.Context())
+	metadata, err := model.PackageMetadataFrom(r.Context(), result.Package)
 	if err != nil {
 		writeProblem(w, r, recommendationProblem(err))
 		return

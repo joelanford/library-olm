@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"encoding/json"
@@ -15,7 +15,8 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
-	testutil "github.com/joelanford/library-olm/internal/util/test"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
+	testutil "github.com/joelanford/library-olm/examples/catalog_server/internal/testutil"
 )
 
 type deprecatedCompositeGraph struct {
@@ -56,20 +57,20 @@ func (r *failingReadCloser) Close() error {
 func TestGetPackageDetailAndLookupOutcomes(t *testing.T) {
 	t.Parallel()
 
-	providerURL, err := catalogv1.ParseURL("https://provider.example.com")
+	providerURL, err := model.ParseURL("https://provider.example.com")
 	require.NoError(t, err)
-	sourceURL, err := catalogv1.ParseURL("https://source.example.com/repo")
+	sourceURL, err := model.ParseURL("https://source.example.com/repo")
 	require.NoError(t, err)
-	email, err := catalogv1.ParseEmailAddress("owner@example.com")
+	email, err := model.ParseEmailAddress("owner@example.com")
 	require.NoError(t, err)
 	basePackage := &testutil.Package{
 		LeafGraph: &testutil.LeafGraph{GraphName: "package/name"},
-		PackageMetadata: catalogv1.PackageMetadata{
+		PackageMetadata: model.PackageMetadata{
 			DisplayName:      "Package Display",
 			ShortDescription: "Short",
 			Description:      "Long description",
-			Provider:         catalogv1.Provider{Name: "Provider", URL: &providerURL},
-			Maintainers:      []catalogv1.Maintainer{{Name: "Owner", Email: &email}},
+			Provider:         model.Provider{Name: "Provider", URL: &providerURL},
+			Maintainers:      []model.Maintainer{{Name: "Owner", Email: &email}},
 			Keywords:         []string{"one", "two"},
 			SourceRepository: &sourceURL,
 			IconAvailable:    true,
@@ -79,7 +80,7 @@ func TestGetPackageDetailAndLookupOutcomes(t *testing.T) {
 	catalog := &testutil.Catalog{
 		CatalogName:     "catalog name",
 		CatalogPriority: 9,
-		Packages:        map[string]catalogv1.Package{"package/name": pkg},
+		Packages:        map[string]catalogv1.UpdateGraph{"package/name": pkg},
 	}
 	response := request(t, NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{catalog}}), "/v1/catalogs/catalog%20name/packages/package%2Fname")
 
@@ -113,7 +114,7 @@ func TestGetPackageDetailAndLookupOutcomes(t *testing.T) {
 		{name: "catalog read failure", reader: &testutil.StoreReader{GetErr: errors.New("secret catalog error")}, path: "/v1/catalogs/c/packages/p", status: http.StatusInternalServerError, problem: problemCatalogReadFailure},
 		{name: "package absent", reader: &testutil.StoreReader{Catalogs: []catalogv1.Catalog{&testutil.Catalog{CatalogName: "c"}}}, path: "/v1/catalogs/c/packages/missing", status: http.StatusNotFound, problem: problemNotFound},
 		{name: "package read failure", reader: &testutil.StoreReader{Catalogs: []catalogv1.Catalog{&testutil.Catalog{CatalogName: "c", GetPackageErr: errors.New("secret package error")}}}, path: "/v1/catalogs/c/packages/p", status: http.StatusInternalServerError, problem: problemCatalogReadFailure},
-		{name: "metadata read failure", reader: &testutil.StoreReader{Catalogs: []catalogv1.Catalog{&testutil.Catalog{CatalogName: "c", Packages: map[string]catalogv1.Package{"p": &testutil.Package{LeafGraph: &testutil.LeafGraph{GraphName: "p"}, MetadataErr: errors.New("secret metadata error")}}}}}, path: "/v1/catalogs/c/packages/p", status: http.StatusInternalServerError, problem: problemCatalogReadFailure},
+		{name: "metadata read failure", reader: &testutil.StoreReader{Catalogs: []catalogv1.Catalog{&testutil.Catalog{CatalogName: "c", Packages: map[string]catalogv1.UpdateGraph{"p": &testutil.Package{LeafGraph: &testutil.LeafGraph{GraphName: "p"}, MetadataErr: errors.New("secret metadata error")}}}}}, path: "/v1/catalogs/c/packages/p", status: http.StatusInternalServerError, problem: problemCatalogReadFailure},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -150,7 +151,7 @@ func TestChannelListRecursesSortsPaginatesAndDetectsCycles(t *testing.T) {
 			"beta":   &testutil.LeafGraph{GraphName: "beta"},
 		},
 	}}
-	catalog := &testutil.Catalog{CatalogName: "catalog", CatalogDigest: "one", Packages: map[string]catalogv1.Package{"package": pkg}}
+	catalog := &testutil.Catalog{CatalogName: "catalog", CatalogDigest: "one", Packages: map[string]catalogv1.UpdateGraph{"package": pkg}}
 	api := NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{catalog}})
 	firstResponse := request(t, api, "/v1/catalogs/catalog/packages/package/channels?limit=3")
 
@@ -182,7 +183,7 @@ func TestChannelListRecursesSortsPaginatesAndDetectsCycles(t *testing.T) {
 		LeafGraph: &testutil.LeafGraph{GraphName: "p"},
 		Graphs:    map[string]catalogv1.UpdateGraph{"cycle": cycle},
 	}}
-	cycleCatalog := &testutil.Catalog{CatalogName: "c", Packages: map[string]catalogv1.Package{"p": cyclePackage}}
+	cycleCatalog := &testutil.Catalog{CatalogName: "c", Packages: map[string]catalogv1.UpdateGraph{"p": cyclePackage}}
 	cycleResponse := request(t, NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{cycleCatalog}}), "/v1/catalogs/c/packages/p/channels")
 	assert.Equal(t, http.StatusInternalServerError, cycleResponse.Code)
 	assertProblem(t, cycleResponse, problemCatalogReadFailure)
@@ -192,7 +193,7 @@ func TestChannelListRecursesSortsPaginatesAndDetectsCycles(t *testing.T) {
 		LeafGraph: &testutil.LeafGraph{GraphName: "p"},
 		Graphs:    map[string]catalogv1.UpdateGraph{"stable": failingChild},
 	}}
-	failingCatalog := &testutil.Catalog{CatalogName: "c", Packages: map[string]catalogv1.Package{"p": failingPackage}}
+	failingCatalog := &testutil.Catalog{CatalogName: "c", Packages: map[string]catalogv1.UpdateGraph{"p": failingPackage}}
 	failure := request(t, NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{failingCatalog}}), "/v1/catalogs/c/packages/p/channels")
 	assert.Equal(t, http.StatusInternalServerError, failure.Code)
 	assert.Equal(t, "application/problem+json", failure.Header().Get("Content-Type"))
@@ -209,7 +210,7 @@ func TestChannelDetailWalksExactDecodedPath(t *testing.T) {
 		LeafGraph: &testutil.LeafGraph{GraphName: "package/name"},
 		Graphs:    map[string]catalogv1.UpdateGraph{"stable channel": stable},
 	}}
-	catalog := &testutil.Catalog{CatalogName: "catalog name", Packages: map[string]catalogv1.Package{"package/name": pkg}}
+	catalog := &testutil.Catalog{CatalogName: "catalog name", Packages: map[string]catalogv1.UpdateGraph{"package/name": pkg}}
 	response := request(t, NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{catalog}}), "/v1/catalogs/catalog%20name/packages/package%2Fname/channels/stable%20channel:1:2")
 
 	assert.Equal(t, http.StatusOK, response.Code)
@@ -253,7 +254,7 @@ func TestBundleCollectionsUseAddressedGraphSortAndBindCursors(t *testing.T) {
 		LeafGraph: &testutil.LeafGraph{GraphName: "package", Bundles: []bundlev1.Bundle{bundle1, bundle2, bundle3}},
 		Graphs:    map[string]catalogv1.UpdateGraph{"stable": stable},
 	}}
-	catalog := &testutil.Catalog{CatalogName: "catalog", CatalogDigest: "one", Packages: map[string]catalogv1.Package{"package": pkg}}
+	catalog := &testutil.Catalog{CatalogName: "catalog", CatalogDigest: "one", Packages: map[string]catalogv1.UpdateGraph{"package": pkg}}
 	reader := &testutil.StoreReader{Catalogs: []catalogv1.Catalog{catalog, &testutil.Catalog{CatalogName: "unrelated", CatalogDigest: "old"}}}
 	api := NewHandler(reader)
 
@@ -313,7 +314,7 @@ func TestBundleCollectionsBufferIteratorFailuresBeforeHeaders(t *testing.T) {
 		ListBundlesErr: errors.New("secret bundle read error"),
 	}
 	pkg := &testutil.Package{LeafGraph: graph}
-	catalog := &testutil.Catalog{CatalogName: "catalog", Packages: map[string]catalogv1.Package{"package": pkg}}
+	catalog := &testutil.Catalog{CatalogName: "catalog", Packages: map[string]catalogv1.UpdateGraph{"package": pkg}}
 	response := request(t, NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{catalog}}), "/v1/catalogs/catalog/packages/package/bundles")
 
 	assert.Equal(t, http.StatusInternalServerError, response.Code)
@@ -329,12 +330,12 @@ func TestGetBundleBuffersRootAndProjectsMetadata(t *testing.T) {
 	timestamp := time.Date(2026, 9, 11, 12, 30, 0, 0, time.UTC)
 	base := testutil.NewBundle(t, "package", "1.2.3", "4")
 	base.BundleURI = "oci://bundle"
-	base.BundleMetadata = bundlev1.BundleMetadata{MediaType: "application/vnd.example.bundle", ReleaseTimestamp: &timestamp}
+	base.BundleMetadata = model.BundleMetadata{MediaType: "registry+v1", ReleaseTimestamp: &timestamp}
 	bundle := &testutil.DeprecatedBundle{Bundle: base, Message: "replace this bundle"}
 	other := testutil.NewBundle(t, "package", "2.0.0", "")
 	graph := &testutil.LeafGraph{GraphName: "package", Bundles: []bundlev1.Bundle{bundle, other}}
 	pkg := &testutil.Package{LeafGraph: graph}
-	catalog := &testutil.Catalog{CatalogName: "catalog", Packages: map[string]catalogv1.Package{"package": pkg}}
+	catalog := &testutil.Catalog{CatalogName: "catalog", Packages: map[string]catalogv1.UpdateGraph{"package": pkg}}
 	api := NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{catalog}})
 	response := request(t, api, "/v1/catalogs/catalog/packages/package/bundles/"+string(bundle.ID()))
 
@@ -346,7 +347,7 @@ func TestGetBundleBuffersRootAndProjectsMetadata(t *testing.T) {
 	assert.Equal(t, "1.2.3", detail.Version)
 	assert.Equal(t, "4", detail.Release)
 	assert.Equal(t, "oci://bundle", detail.URI)
-	assert.Equal(t, "application/vnd.example.bundle", detail.MediaType)
+	assert.Equal(t, "registry+v1", detail.MediaType)
 	assert.Equal(t, timestamp, *detail.ReleaseTimestamp)
 	assert.Equal(t, "replace this bundle", detail.DeprecationMessage)
 	assert.Equal(t, 1, graph.ListBundlesCalls)
@@ -375,10 +376,9 @@ func TestGetIconStreamsValidContentAndHandlesFailures(t *testing.T) {
 	t.Parallel()
 
 	t.Run("streams and closes", func(t *testing.T) {
-		stream := &trackingReadCloser{Reader: strings.NewReader("icon bytes")}
 		pkg := &testutil.Package{
 			LeafGraph:   &testutil.LeafGraph{GraphName: "package"},
-			PackageIcon: catalogv1.Icon{Content: stream, MediaType: "image/svg+xml; charset=utf-8"},
+			PackageIcon: model.Icon{Content: []byte("icon bytes"), MediaType: "image/svg+xml; charset=utf-8"},
 		}
 		response := request(t, handlerForPackage(pkg), "/v1/catalogs/catalog/packages/package/icon")
 		assert.Equal(t, http.StatusOK, response.Code)
@@ -387,9 +387,17 @@ func TestGetIconStreamsValidContentAndHandlesFailures(t *testing.T) {
 		assert.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
 		assert.Equal(t, "default-src 'none'; sandbox", response.Header().Get("Content-Security-Policy"))
 		assert.Equal(t, "icon bytes", response.Body.String())
-		assert.True(t, stream.closed)
 		assert.Equal(t, 1, pkg.IconCalls)
 		assert.Zero(t, pkg.MetadataCalls)
+	})
+
+	t.Run("writer streams and closes", func(t *testing.T) {
+		stream := &trackingReadCloser{Reader: strings.NewReader("icon bytes")}
+		response := httptest.NewRecorder()
+		writeIcon(response, httptest.NewRequest(http.MethodGet, "/icon", nil), stream, "image/png")
+		assert.Equal(t, http.StatusOK, response.Code)
+		assert.Equal(t, "icon bytes", response.Body.String())
+		assert.True(t, stream.closed)
 	})
 
 	t.Run("absent", func(t *testing.T) {
@@ -410,8 +418,8 @@ func TestGetIconStreamsValidContentAndHandlesFailures(t *testing.T) {
 
 	t.Run("invalid media type closes before headers", func(t *testing.T) {
 		stream := &trackingReadCloser{Reader: strings.NewReader("not written")}
-		pkg := &testutil.Package{LeafGraph: &testutil.LeafGraph{GraphName: "package"}, PackageIcon: catalogv1.Icon{Content: stream, MediaType: "not a media type"}}
-		response := request(t, handlerForPackage(pkg), "/v1/catalogs/catalog/packages/package/icon")
+		response := httptest.NewRecorder()
+		writeIcon(response, httptest.NewRequest(http.MethodGet, "/icon", nil), stream, "not a media type")
 		assert.Equal(t, http.StatusInternalServerError, response.Code)
 		assertProblem(t, response, problemCatalogReadFailure)
 		assert.True(t, stream.closed)
@@ -420,8 +428,8 @@ func TestGetIconStreamsValidContentAndHandlesFailures(t *testing.T) {
 
 	t.Run("copy error terminates after headers", func(t *testing.T) {
 		stream := &failingReadCloser{}
-		pkg := &testutil.Package{LeafGraph: &testutil.LeafGraph{GraphName: "package"}, PackageIcon: catalogv1.Icon{Content: stream, MediaType: "image/png"}}
-		response := request(t, handlerForPackage(pkg), "/v1/catalogs/catalog/packages/package/icon")
+		response := httptest.NewRecorder()
+		writeIcon(response, httptest.NewRequest(http.MethodGet, "/icon", nil), stream, "image/png")
 		assert.Equal(t, http.StatusOK, response.Code)
 		assert.Equal(t, "image/png", response.Header().Get("Content-Type"))
 		assert.Equal(t, "partial", response.Body.String())
@@ -437,8 +445,8 @@ func request(t *testing.T, handler http.Handler, path string) *httptest.Response
 	return response
 }
 
-func handlerForPackage(pkg catalogv1.Package) http.Handler {
-	catalog := &testutil.Catalog{CatalogName: "catalog", Packages: map[string]catalogv1.Package{"package": pkg}}
+func handlerForPackage(pkg catalogv1.UpdateGraph) http.Handler {
+	catalog := &testutil.Catalog{CatalogName: "catalog", Packages: map[string]catalogv1.UpdateGraph{"package": pkg}}
 	return NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{catalog}})
 }
 

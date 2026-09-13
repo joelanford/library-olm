@@ -12,10 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	cataloghttp "github.com/joelanford/library-olm/catalog/http"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 	"github.com/joelanford/library-olm/catalog/v1/fbc"
 	"github.com/joelanford/library-olm/catalog/v1/sqlite"
+	"github.com/joelanford/library-olm/examples/catalog_server/api"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/fbcextension"
 )
 
 func main() {
@@ -62,7 +63,7 @@ func run(ctx context.Context, args []string) (err error) {
 	log.Printf("importing FBC catalog from %s", args[1])
 	c, err := store.Set(ctx, "catalog",
 		catalogv1.WithURI(args[1]),
-		catalogv1.WithContent(fbc.NewFSImporter(os.DirFS(args[1])), ""),
+		catalogv1.WithContent(fbc.NewFSImporter(os.DirFS(args[1]), fbc.WithOLMPackageExtension(fbcextension.New())), ""),
 	)
 	if err != nil {
 		var partialImportErr catalogv1.PartialImportError
@@ -75,7 +76,7 @@ func run(ctx context.Context, args []string) (err error) {
 
 	server := &http.Server{
 		Addr:              "localhost:8080",
-		Handler:           requestLogger(cataloghttp.NewHandler(store)),
+		Handler:           requestLogger(api.NewHandler(store)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("serving catalog API at http://%s", server.Addr)

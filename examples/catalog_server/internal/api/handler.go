@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
 )
 
 type handler struct {
@@ -172,7 +173,7 @@ func packageSummaries(ctx context.Context, prefix string, catalogs []catalogv1.C
 			if err != nil {
 				return nil, err
 			}
-			metadata, err := pkg.Metadata(ctx)
+			metadata, err := model.PackageMetadataFrom(ctx, pkg)
 			if err != nil {
 				return nil, err
 			}

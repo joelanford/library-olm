@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
 )
 
 const (
@@ -37,7 +38,7 @@ func (h *handler) getPackage(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, *problem)
 		return
 	}
-	metadata, err := pkg.Metadata(r.Context())
+	metadata, err := model.PackageMetadataFrom(r.Context(), pkg)
 	if err != nil {
 		writeProblem(w, r, readProblem(err))
 		return
@@ -216,30 +217,34 @@ func (h *handler) getIcon(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, *problem)
 		return
 	}
-	icon, err := pkg.Icon(r.Context())
+	icon, mediaType, err := model.IconFrom(r.Context(), pkg)
 	if err != nil {
 		writeProblem(w, r, readProblem(err))
 		return
 	}
-	if icon.Content == nil {
+	if icon == nil {
 		writeProblem(w, r, newProblem(problemNotFound))
 		return
 	}
+	writeIcon(w, r, icon, mediaType)
+}
+
+func writeIcon(w http.ResponseWriter, r *http.Request, icon io.ReadCloser, mediaType string) {
 	defer func() { _ = icon.Close() }()
-	if !validMediaType(icon.MediaType) {
+	if !validMediaType(mediaType) {
 		writeProblem(w, r, newProblem(problemCatalogReadFailure))
 		return
 	}
 
-	w.Header().Set("Content-Type", icon.MediaType)
+	w.Header().Set("Content-Type", mediaType)
 	w.Header().Set("Content-Disposition", "attachment")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, icon.Content)
+	_, _ = io.Copy(w, icon)
 }
 
-func (h *handler) getCatalogPackage(r *http.Request) (catalogv1.Catalog, catalogv1.Package, *problemDetails) {
+func (h *handler) getCatalogPackage(r *http.Request) (catalogv1.Catalog, catalogv1.UpdateGraph, *problemDetails) {
 	catalog, err := h.reader.Get(r.PathValue("catalog"))
 	if err != nil {
 		problem := readProblem(err)

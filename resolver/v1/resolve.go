@@ -76,7 +76,7 @@ func PreferNonDeprecatedBundles() ResolveOption {
 // Result holds the output of a Resolve call.
 type Result struct {
 	Catalog catalogv1.Catalog
-	Package catalogv1.Package
+	Package catalogv1.UpdateGraph
 	Bundles []bundlev1.Bundle
 }
 
@@ -136,12 +136,12 @@ func Resolve(ctx context.Context, reader catalogv1.StoreReader, packageName stri
 	return &Result{Catalog: cat, Package: pkg, Bundles: bundles}, nil
 }
 
-func selectPackage(ctx context.Context, catalogs []catalogv1.Catalog, packageName string) (catalogv1.Catalog, catalogv1.Package, error) {
+func selectPackage(ctx context.Context, catalogs []catalogv1.Catalog, packageName string) (catalogv1.Catalog, catalogv1.UpdateGraph, error) {
 	groups := groupByPriority(catalogs)
 	for _, group := range groups {
 		type match struct {
 			catalog catalogv1.Catalog
-			pkg     catalogv1.Package
+			pkg     catalogv1.UpdateGraph
 		}
 		var matches []match
 		var readErrs []error
@@ -278,10 +278,7 @@ func sortBundles(bundles []bundlev1.Bundle, preferNonDeprecated bool) {
 }
 
 func cmpVersionDesc(a, b bundlev1.Bundle) int {
-	if c := b.NameVersionRelease().Compare(a.NameVersionRelease()); c != 0 {
-		return c
-	}
-	return cmp.Compare(a.ID(), b.ID())
+	return b.NameVersionRelease().Compare(a.NameVersionRelease())
 }
 
 func cmpDeprecation(a, b bundlev1.Bundle) int {

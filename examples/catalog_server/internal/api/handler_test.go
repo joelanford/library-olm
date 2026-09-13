@@ -1,9 +1,8 @@
-package cataloghttp
+package api
 
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +12,8 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
-	testutil "github.com/joelanford/library-olm/internal/util/test"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
+	testutil "github.com/joelanford/library-olm/examples/catalog_server/internal/testutil"
 )
 
 func TestNewHandlerConstructionAndMounting(t *testing.T) {
@@ -87,10 +87,10 @@ func TestHandlerRecognizesEveryContractRoute(t *testing.T) {
 			LeafGraph: &testutil.LeafGraph{GraphName: "cert-manager", Bundles: []bundlev1.Bundle{bundle}},
 			Graphs:    map[string]catalogv1.UpdateGraph{"stable": stable},
 		},
-		PackageIcon: catalogv1.Icon{Content: io.NopCloser(bytes.NewBufferString("icon")), MediaType: "image/png"},
+		PackageIcon: model.Icon{Content: []byte("icon"), MediaType: "image/png"},
 	}
 	api := NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{
-		&testutil.Catalog{CatalogName: "redhat", Packages: map[string]catalogv1.Package{"cert-manager": pkg}},
+		&testutil.Catalog{CatalogName: "redhat", Packages: map[string]catalogv1.UpdateGraph{"cert-manager": pkg}},
 	}})
 	for _, test := range tests {
 		t.Run(test.method+" "+test.path, func(t *testing.T) {
@@ -121,7 +121,7 @@ func TestHandlerUsesDecodedPathValues(t *testing.T) {
 	}}
 	reader := &testutil.StoreReader{Catalogs: []catalogv1.Catalog{
 		&testutil.Catalog{CatalogName: "red hat/catalog"},
-		&testutil.Catalog{CatalogName: "c", Packages: map[string]catalogv1.Package{"p": pkg}},
+		&testutil.Catalog{CatalogName: "c", Packages: map[string]catalogv1.UpdateGraph{"p": pkg}},
 	}}
 	api := NewHandler(reader)
 

@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
-	testutil "github.com/joelanford/library-olm/internal/util/test"
+	testutil "github.com/joelanford/library-olm/examples/catalog_server/internal/testutil"
 )
 
 func TestDeterministicSortHelpers(t *testing.T) {

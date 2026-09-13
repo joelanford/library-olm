@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"time"
 
 	bsemver "github.com/blang/semver/v4"
 )
@@ -24,15 +23,7 @@ type BundleIdentity interface {
 type Bundle interface {
 	BundleIdentity
 	URI() string
-	Metadata(ctx context.Context) (BundleMetadata, error)
 	Property(ctx context.Context, key string) (json.RawMessage, error)
-}
-
-// BundleMetadata contains portable bundle release metadata. Empty fields are
-// absent; ReleaseTimestamp is optional so its zero time remains representable.
-type BundleMetadata struct {
-	MediaType        string
-	ReleaseTimestamp *time.Time
 }
 
 // NameVersionRelease is a bundle identity: package name + version + release.

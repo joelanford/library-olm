@@ -10,7 +10,7 @@ import (
 
 // CatalogFSBuilder constructs an FBC catalog filesystem.
 type CatalogFSBuilder interface {
-	WithPackage(name string, opts ...PackageOption) CatalogFSBuilder
+	WithPackage(name string) CatalogFSBuilder
 	WithChannel(pkg, name string, entries ...ChannelEntry) CatalogFSBuilder
 	WithBundle(pkg, version string, opts ...BundleOption) CatalogFSBuilder
 	WithDeprecation(pkg string, entries ...declcfg.DeprecationEntry) CatalogFSBuilder
@@ -39,9 +39,7 @@ type customBlob struct {
 }
 
 type packageBlob struct {
-	name        string
-	description string
-	icon        *fbcIconJSON
+	name string
 }
 
 type channelBlob struct {
@@ -51,21 +49,16 @@ type channelBlob struct {
 }
 
 type bundleBlob struct {
-	pkg        string
-	version    string
-	name       string
-	image      string
-	imageSet   bool
-	release    string
-	properties []fbcPropertyJSON
+	pkg      string
+	version  string
+	name     string
+	image    string
+	imageSet bool
+	release  string
 }
 
-func (b *builder) WithPackage(name string, opts ...PackageOption) CatalogFSBuilder {
-	pkg := packageBlob{name: name}
-	for _, opt := range opts {
-		opt(&pkg)
-	}
-	b.packages = append(b.packages, pkg)
+func (b *builder) WithPackage(name string) CatalogFSBuilder {
+	b.packages = append(b.packages, packageBlob{name: name})
 	return b
 }
 
@@ -121,7 +114,7 @@ func (b *builder) Build() fstest.MapFS {
 	}
 	for _, p := range b.packages {
 		path := fmt.Sprintf("%s/olm.package.json", p.name)
-		addBlob(path, mustMarshal(fbcPackageJSON{Schema: "olm.package", Name: p.name, Description: p.description, Icon: p.icon}))
+		addBlob(path, mustMarshal(fbcPackageJSON{Schema: "olm.package", Name: p.name}))
 	}
 	for _, ch := range b.channels {
 		entries := make([]fbcChannelEntryJSON, len(ch.entries))
@@ -153,16 +146,15 @@ func (b *builder) Build() fstest.MapFS {
 			prop.Release = bndl.release
 		}
 		path := fmt.Sprintf("%s/olm.bundle.%s.json", bndl.pkg, name)
-		properties := append([]fbcPropertyJSON{{
-			Type:  "olm.package",
-			Value: prop,
-		}}, bndl.properties...)
 		addBlob(path, mustMarshal(fbcBundleJSON{
-			Schema:     "olm.bundle",
-			Package:    bndl.pkg,
-			Name:       name,
-			Image:      image,
-			Properties: properties,
+			Schema:  "olm.bundle",
+			Package: bndl.pkg,
+			Name:    name,
+			Image:   image,
+			Properties: []fbcPropertyJSON{{
+				Type:  "olm.package",
+				Value: prop,
+			}},
 		}))
 	}
 	for _, d := range b.deprecations {
@@ -231,21 +223,6 @@ func SkipRange(r string) EntryOption {
 // BundleOption configures a bundle.
 type BundleOption func(*bundleBlob)
 
-// PackageOption configures a package.
-type PackageOption func(*packageBlob)
-
-// WithDescription sets the package description.
-func WithDescription(description string) PackageOption {
-	return func(p *packageBlob) { p.description = description }
-}
-
-// WithIcon sets the package icon.
-func WithIcon(data []byte, mediaType string) PackageOption {
-	return func(p *packageBlob) {
-		p.icon = &fbcIconJSON{Data: data, MediaType: mediaType}
-	}
-}
-
 // WithName overrides the auto-derived bundle name (default: "<package>.v<version>").
 func WithName(name string) BundleOption {
 	return func(b *bundleBlob) { b.name = name }
@@ -259,13 +236,6 @@ func WithImage(image string) BundleOption {
 // WithRelease sets the release field in the olm.package property.
 func WithRelease(release string) BundleOption {
 	return func(b *bundleBlob) { b.release = release }
-}
-
-// WithCSVMetadata adds an olm.csv.metadata property to a bundle.
-func WithCSVMetadata(value any) BundleOption {
-	return func(b *bundleBlob) {
-		b.properties = append(b.properties, fbcPropertyJSON{Type: "olm.csv.metadata", Value: value})
-	}
 }
 
 func resolveEntry(pkg string, e ChannelEntry) fbcChannelEntryJSON {
@@ -298,15 +268,8 @@ func mustMarshal(v any) []byte {
 // JSON serialization types
 
 type fbcPackageJSON struct {
-	Schema      string       `json:"schema"`
-	Name        string       `json:"name"`
-	Description string       `json:"description,omitempty"`
-	Icon        *fbcIconJSON `json:"icon,omitempty"`
-}
-
-type fbcIconJSON struct {
-	Data      []byte `json:"base64data"`
-	MediaType string `json:"mediatype"`
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
 }
 
 type fbcChannelJSON struct {

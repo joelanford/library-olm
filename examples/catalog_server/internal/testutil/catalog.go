@@ -1,4 +1,4 @@
-package test
+package testutil
 
 import (
 	"context"
@@ -12,9 +12,9 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
 )
 
-// StoreReader is a small in-memory catalogv1.StoreReader for tests.
 type StoreReader struct {
 	Catalogs      []catalogv1.Catalog
 	ListErr       error
@@ -73,14 +73,13 @@ func (r *StoreReader) catalogs() []catalogv1.Catalog {
 	return selected
 }
 
-// Catalog is a configurable catalogv1.Catalog with package lookup observation.
 type Catalog struct {
 	CatalogName       string
 	CatalogURI        string
 	CatalogDigest     string
 	CatalogPriority   int
 	CatalogLabels     map[string]string
-	Packages          map[string]catalogv1.Package
+	Packages          map[string]catalogv1.UpdateGraph
 	ListPackagesErr   error
 	GetPackageErr     error
 	ListPackagesCalls int
@@ -93,9 +92,9 @@ func (c *Catalog) Digest() string            { return c.CatalogDigest }
 func (c *Catalog) Priority() int             { return c.CatalogPriority }
 func (c *Catalog) Labels() map[string]string { return maps.Clone(c.CatalogLabels) }
 
-func (c *Catalog) ListPackages(context.Context) iter.Seq2[catalogv1.Package, error] {
+func (c *Catalog) ListPackages(context.Context) iter.Seq2[catalogv1.UpdateGraph, error] {
 	c.ListPackagesCalls++
-	return func(yield func(catalogv1.Package, error) bool) {
+	return func(yield func(catalogv1.UpdateGraph, error) bool) {
 		names := make([]string, 0, len(c.Packages))
 		for name := range c.Packages {
 			names = append(names, name)
@@ -112,7 +111,7 @@ func (c *Catalog) ListPackages(context.Context) iter.Seq2[catalogv1.Package, err
 	}
 }
 
-func (c *Catalog) GetPackage(_ context.Context, name string) (catalogv1.Package, error) {
+func (c *Catalog) GetPackage(_ context.Context, name string) (catalogv1.UpdateGraph, error) {
 	c.GetPackageCalls = append(c.GetPackageCalls, name)
 	if c.GetPackageErr != nil {
 		return nil, c.GetPackageErr
@@ -123,7 +122,6 @@ func (c *Catalog) GetPackage(_ context.Context, name string) (catalogv1.Package,
 	return nil, fmt.Errorf("package %q: %w", name, catalogv1.ErrNotFound)
 }
 
-// LeafGraph is a configurable catalogv1.UpdateGraph for tests.
 type LeafGraph struct {
 	GraphName        string
 	Bundles          []bundlev1.Bundle
@@ -132,6 +130,8 @@ type LeafGraph struct {
 	SuccessorsErr    error
 	ListBundlesCalls int
 	SuccessorsCalls  []bundlev1.BundleIdentity
+	Properties       map[string]json.RawMessage
+	PropertyErr      error
 }
 
 func (g *LeafGraph) Name() string { return g.GraphName }
@@ -146,9 +146,42 @@ func (g *LeafGraph) Successors(_ context.Context, from bundlev1.BundleIdentity) 
 	return valuesOrError(g.SuccessorBundles, g.SuccessorsErr)
 }
 
-func (g *LeafGraph) Property(context.Context, string) (json.RawMessage, error) { return nil, nil }
+func (g *LeafGraph) Property(_ context.Context, key string) (json.RawMessage, error) {
+	return g.Properties[key], g.PropertyErr
+}
 
-// CompositeGraph is a configurable catalogv1.CompositeUpdateGraph for tests.
+type Package struct {
+	*LeafGraph
+	PackageMetadata model.PackageMetadata
+	PackageIcon     model.Icon
+	MetadataErr     error
+	IconErr         error
+	MetadataCalls   int
+	IconCalls       int
+}
+
+func (p *Package) Property(ctx context.Context, key string) (json.RawMessage, error) {
+	switch key {
+	case model.PackageMetadataProperty:
+		p.MetadataCalls++
+		if p.MetadataErr != nil {
+			return nil, p.MetadataErr
+		}
+		return json.Marshal(p.PackageMetadata)
+	case model.PackageIconProperty:
+		p.IconCalls++
+		if p.IconErr != nil {
+			return nil, p.IconErr
+		}
+		if p.PackageIcon.Content == nil {
+			return nil, nil
+		}
+		return json.Marshal(p.PackageIcon)
+	default:
+		return p.LeafGraph.Property(ctx, key)
+	}
+}
+
 type CompositeGraph struct {
 	*LeafGraph
 	Graphs          map[string]catalogv1.UpdateGraph
@@ -189,46 +222,36 @@ func (g *CompositeGraph) GetGraph(_ context.Context, name string) (catalogv1.Upd
 	return nil, fmt.Errorf("graph %q: %w", name, catalogv1.ErrNotFound)
 }
 
-// Package is a configurable package root that does not have child graphs.
-type Package struct {
-	*LeafGraph
-	PackageMetadata catalogv1.PackageMetadata
-	MetadataErr     error
-	MetadataCalls   int
-	PackageIcon     catalogv1.Icon
-	IconErr         error
-	IconCalls       int
-}
-
-func (p *Package) Metadata(context.Context) (catalogv1.PackageMetadata, error) {
-	p.MetadataCalls++
-	return p.PackageMetadata, p.MetadataErr
-}
-
-func (p *Package) Icon(context.Context) (catalogv1.Icon, error) {
-	p.IconCalls++
-	return p.PackageIcon, p.IconErr
-}
-
-// CompositePackage is a configurable package root with child graphs.
 type CompositePackage struct {
 	*CompositeGraph
-	PackageMetadata catalogv1.PackageMetadata
+	PackageMetadata model.PackageMetadata
+	PackageIcon     model.Icon
 	MetadataErr     error
-	MetadataCalls   int
-	PackageIcon     catalogv1.Icon
 	IconErr         error
+	MetadataCalls   int
 	IconCalls       int
 }
 
-func (p *CompositePackage) Metadata(context.Context) (catalogv1.PackageMetadata, error) {
-	p.MetadataCalls++
-	return p.PackageMetadata, p.MetadataErr
-}
-
-func (p *CompositePackage) Icon(context.Context) (catalogv1.Icon, error) {
-	p.IconCalls++
-	return p.PackageIcon, p.IconErr
+func (p *CompositePackage) Property(ctx context.Context, key string) (json.RawMessage, error) {
+	switch key {
+	case model.PackageMetadataProperty:
+		p.MetadataCalls++
+		if p.MetadataErr != nil {
+			return nil, p.MetadataErr
+		}
+		return json.Marshal(p.PackageMetadata)
+	case model.PackageIconProperty:
+		p.IconCalls++
+		if p.IconErr != nil {
+			return nil, p.IconErr
+		}
+		if p.PackageIcon.Content == nil {
+			return nil, nil
+		}
+		return json.Marshal(p.PackageIcon)
+	default:
+		return p.CompositeGraph.Property(ctx, key)
+	}
 }
 
 func valuesOrError[T any](values []T, err error) iter.Seq2[T, error] {
@@ -249,6 +272,5 @@ var _ catalogv1.StoreReader = (*StoreReader)(nil)
 var _ catalogv1.Catalog = (*Catalog)(nil)
 var _ catalogv1.UpdateGraph = (*LeafGraph)(nil)
 var _ catalogv1.CompositeUpdateGraph = (*CompositeGraph)(nil)
-var _ catalogv1.Package = (*Package)(nil)
-var _ catalogv1.Package = (*CompositePackage)(nil)
+var _ catalogv1.UpdateGraph = (*Package)(nil)
 var _ catalogv1.CompositeUpdateGraph = (*CompositePackage)(nil)

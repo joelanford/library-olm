@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"encoding/json"
@@ -14,7 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
-	testutil "github.com/joelanford/library-olm/internal/util/test"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
+	testutil "github.com/joelanford/library-olm/examples/catalog_server/internal/testutil"
 )
 
 func TestFakeStoreReaderSelectorNarrowsExistingSelection(t *testing.T) {
@@ -258,7 +259,7 @@ func TestListPackagesOccurrencesOrderingAndSelector(t *testing.T) {
 	packageIn := func(name, displayName string) *testutil.Package {
 		return &testutil.Package{
 			LeafGraph:       &testutil.LeafGraph{GraphName: name},
-			PackageMetadata: catalogv1.PackageMetadata{DisplayName: displayName, Provider: catalogv1.Provider{Name: "provider"}},
+			PackageMetadata: model.PackageMetadata{DisplayName: displayName, Provider: model.Provider{Name: "provider"}},
 		}
 	}
 	alphaHighZ := packageIn("alpha", "high-z")
@@ -267,10 +268,10 @@ func TestListPackagesOccurrencesOrderingAndSelector(t *testing.T) {
 	beta := packageIn("beta", "beta")
 	excluded := packageIn("alpha", "excluded")
 	catalogs := []*testutil.Catalog{
-		{CatalogName: "z", CatalogPriority: 10, CatalogLabels: map[string]string{"env": "prod"}, Packages: map[string]catalogv1.Package{"alpha": alphaHighZ}},
-		{CatalogName: "a", CatalogPriority: 10, CatalogLabels: map[string]string{"env": "prod"}, Packages: map[string]catalogv1.Package{"alpha": alphaHighA, "beta": beta}},
-		{CatalogName: "low", CatalogPriority: 1, CatalogLabels: map[string]string{"env": "prod"}, Packages: map[string]catalogv1.Package{"alpha": alphaLow}},
-		{CatalogName: "dev", CatalogPriority: 100, CatalogLabels: map[string]string{"env": "dev"}, Packages: map[string]catalogv1.Package{"alpha": excluded}},
+		{CatalogName: "z", CatalogPriority: 10, CatalogLabels: map[string]string{"env": "prod"}, Packages: map[string]catalogv1.UpdateGraph{"alpha": alphaHighZ}},
+		{CatalogName: "a", CatalogPriority: 10, CatalogLabels: map[string]string{"env": "prod"}, Packages: map[string]catalogv1.UpdateGraph{"alpha": alphaHighA, "beta": beta}},
+		{CatalogName: "low", CatalogPriority: 1, CatalogLabels: map[string]string{"env": "prod"}, Packages: map[string]catalogv1.UpdateGraph{"alpha": alphaLow}},
+		{CatalogName: "dev", CatalogPriority: 100, CatalogLabels: map[string]string{"env": "dev"}, Packages: map[string]catalogv1.UpdateGraph{"alpha": excluded}},
 	}
 	reader := &testutil.StoreReader{Catalogs: []catalogv1.Catalog{catalogs[0], catalogs[1], catalogs[2], catalogs[3]}}
 	response := httptest.NewRecorder()
@@ -317,7 +318,7 @@ func TestListPackagesPaginationAndCursorBinding(t *testing.T) {
 	newPackage := func(name string) *testutil.Package {
 		return &testutil.Package{LeafGraph: &testutil.LeafGraph{GraphName: name}}
 	}
-	catalog := &testutil.Catalog{CatalogName: "catalog", CatalogDigest: "1", Packages: map[string]catalogv1.Package{
+	catalog := &testutil.Catalog{CatalogName: "catalog", CatalogDigest: "1", Packages: map[string]catalogv1.UpdateGraph{
 		"a": newPackage("a"),
 		"b": newPackage("b"),
 		"c": newPackage("c"),
@@ -367,7 +368,7 @@ func TestListPackagesReadsEverythingBeforeSuccessHeaders(t *testing.T) {
 		LeafGraph:   &testutil.LeafGraph{GraphName: "b"},
 		MetadataErr: errors.New("secret metadata failure"),
 	}
-	catalog := &testutil.Catalog{CatalogName: "catalog", Packages: map[string]catalogv1.Package{"a": first, "b": failing}}
+	catalog := &testutil.Catalog{CatalogName: "catalog", Packages: map[string]catalogv1.UpdateGraph{"a": first, "b": failing}}
 	response := httptest.NewRecorder()
 	NewHandler(&testutil.StoreReader{Catalogs: []catalogv1.Catalog{catalog}}).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/packages", nil))
 

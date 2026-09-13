@@ -1,4 +1,4 @@
-package cataloghttp
+package api
 
 import (
 	"bytes"
@@ -16,7 +16,8 @@ import (
 
 	bundlev1 "github.com/joelanford/library-olm/bundle/v1"
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
-	testutil "github.com/joelanford/library-olm/internal/util/test"
+	"github.com/joelanford/library-olm/examples/catalog_server/internal/model"
+	testutil "github.com/joelanford/library-olm/examples/catalog_server/internal/testutil"
 )
 
 func TestRecommendMapsPolicyAndCurrentBundle(t *testing.T) {
@@ -61,7 +62,7 @@ func TestRecommendMapsPolicyAndCurrentBundle(t *testing.T) {
 			pkg := &testutil.Package{LeafGraph: graph}
 			api := NewHandler(recommendationReader(&testutil.Catalog{
 				CatalogName: "catalog",
-				Packages:    map[string]catalogv1.Package{"pkg": pkg},
+				Packages:    map[string]catalogv1.UpdateGraph{"pkg": pkg},
 			}))
 
 			response := postRecommendation(api, "/v1/recommendations/pkg", test.body)
@@ -97,7 +98,7 @@ func TestRecommendTranslatesChannelsVersionAndDeprecationPreference(t *testing.T
 	pkg := &testutil.CompositePackage{CompositeGraph: root}
 	api := NewHandler(recommendationReader(&testutil.Catalog{
 		CatalogName: "catalog",
-		Packages:    map[string]catalogv1.Package{"pkg": pkg},
+		Packages:    map[string]catalogv1.UpdateGraph{"pkg": pkg},
 	}))
 
 	response := postRecommendation(api, "/v1/recommendations/pkg", `{
@@ -121,7 +122,7 @@ func TestRecommendIncludesCandidateBundleRef(t *testing.T) {
 	bundle.BundleURI = "oci://registry.example/pkg@sha256:1234"
 	api := NewHandler(recommendationReader(&testutil.Catalog{
 		CatalogName: "catalog",
-		Packages: map[string]catalogv1.Package{
+		Packages: map[string]catalogv1.UpdateGraph{
 			"pkg": &testutil.Package{LeafGraph: &testutil.LeafGraph{GraphName: "pkg", Bundles: []bundlev1.Bundle{bundle}}},
 		},
 	}))
@@ -140,19 +141,19 @@ func TestRecommendUsesSelectedReaderAndResultMetadata(t *testing.T) {
 	highPackage := &testutil.Package{LeafGraph: &testutil.LeafGraph{GraphName: "pkg", Bundles: []bundlev1.Bundle{testutil.NewBundle(t, "pkg", "9.0.0", "")}}}
 	lowPackage := &testutil.Package{
 		LeafGraph:       &testutil.LeafGraph{GraphName: "pkg", Bundles: []bundlev1.Bundle{testutil.NewBundle(t, "pkg", "1.0.0", "")}},
-		PackageMetadata: catalogv1.PackageMetadata{DisplayName: "selected package", Provider: catalogv1.Provider{Name: "provider"}},
+		PackageMetadata: model.PackageMetadata{DisplayName: "selected package", Provider: model.Provider{Name: "provider"}},
 	}
 	high := &testutil.Catalog{
 		CatalogName:     "high",
 		CatalogPriority: 100,
 		CatalogLabels:   map[string]string{"tier": "high"},
-		Packages:        map[string]catalogv1.Package{"pkg": highPackage},
+		Packages:        map[string]catalogv1.UpdateGraph{"pkg": highPackage},
 	}
 	low := &testutil.Catalog{
 		CatalogName:     "low",
 		CatalogPriority: 1,
 		CatalogLabels:   map[string]string{"tier": "low"},
-		Packages:        map[string]catalogv1.Package{"pkg": lowPackage},
+		Packages:        map[string]catalogv1.UpdateGraph{"pkg": lowPackage},
 	}
 	reader := recommendationReader(high, low)
 	api := NewHandler(reader)
@@ -188,8 +189,8 @@ func TestRecommendMapsResolverOutcomesWithoutLeakingDetails(t *testing.T) {
 		{
 			name: "ambiguous",
 			reader: recommendationReader(
-				&testutil.Catalog{CatalogName: "a", Packages: map[string]catalogv1.Package{"pkg": testPackage("pkg")}},
-				&testutil.Catalog{CatalogName: "b", Packages: map[string]catalogv1.Package{"pkg": testPackage("pkg")}},
+				&testutil.Catalog{CatalogName: "a", Packages: map[string]catalogv1.UpdateGraph{"pkg": testPackage("pkg")}},
+				&testutil.Catalog{CatalogName: "b", Packages: map[string]catalogv1.UpdateGraph{"pkg": testPackage("pkg")}},
 			),
 			kind: problemAmbiguousPackage,
 		},
@@ -212,7 +213,7 @@ func TestRecommendMapsResolverOutcomesWithoutLeakingDetails(t *testing.T) {
 			name: "typed absence surfaced by resolver",
 			reader: recommendationReader(&testutil.Catalog{
 				CatalogName: "catalog",
-				Packages: map[string]catalogv1.Package{"pkg": &testutil.Package{LeafGraph: &testutil.LeafGraph{
+				Packages: map[string]catalogv1.UpdateGraph{"pkg": &testutil.Package{LeafGraph: &testutil.LeafGraph{
 					GraphName:      "pkg",
 					ListBundlesErr: catalogv1.ErrNotFound,
 				}}},
@@ -223,7 +224,7 @@ func TestRecommendMapsResolverOutcomesWithoutLeakingDetails(t *testing.T) {
 			name: "metadata failure",
 			reader: recommendationReader(&testutil.Catalog{
 				CatalogName: "catalog",
-				Packages: map[string]catalogv1.Package{"pkg": &testutil.Package{
+				Packages: map[string]catalogv1.UpdateGraph{"pkg": &testutil.Package{
 					LeafGraph:   &testutil.LeafGraph{GraphName: "pkg"},
 					MetadataErr: errors.New("secret metadata failure"),
 				}},
@@ -297,7 +298,7 @@ func TestRecommendPaginationBindsBodySelectorAndSnapshot(t *testing.T) {
 		CatalogName:   "catalog",
 		CatalogDigest: "one",
 		CatalogLabels: map[string]string{"env": "prod", "region": "us"},
-		Packages:      map[string]catalogv1.Package{"pkg": &testutil.Package{LeafGraph: graph}},
+		Packages:      map[string]catalogv1.UpdateGraph{"pkg": &testutil.Package{LeafGraph: graph}},
 	}
 	reader := recommendationReader(catalog)
 	api := NewHandler(reader)
@@ -347,7 +348,7 @@ func TestRecommendSnapshotReadFailureOccursBeforeResolverExecution(t *testing.T)
 	pkg := &testutil.Package{LeafGraph: graph}
 	reader := recommendationReader(&testutil.Catalog{
 		CatalogName: "catalog",
-		Packages:    map[string]catalogv1.Package{"pkg": pkg},
+		Packages:    map[string]catalogv1.UpdateGraph{"pkg": pkg},
 	})
 	reader.ListErr = errors.New("secret snapshot failure")
 
@@ -381,7 +382,7 @@ func TestRecommendRejectsStaleCursorBeforeReplacementOutcomes(t *testing.T) {
 				reader.Catalogs = append(reader.Catalogs, &testutil.Catalog{
 					CatalogName:   "other",
 					CatalogDigest: "other",
-					Packages:      map[string]catalogv1.Package{"pkg": testPackage("pkg")},
+					Packages:      map[string]catalogv1.UpdateGraph{"pkg": testPackage("pkg")},
 				})
 			},
 		},
@@ -401,7 +402,7 @@ func TestRecommendRejectsStaleCursorBeforeReplacementOutcomes(t *testing.T) {
 			catalog := &testutil.Catalog{
 				CatalogName:   "catalog",
 				CatalogDigest: "one",
-				Packages:      map[string]catalogv1.Package{"pkg": &testutil.Package{LeafGraph: graph}},
+				Packages:      map[string]catalogv1.UpdateGraph{"pkg": &testutil.Package{LeafGraph: graph}},
 			}
 			reader := recommendationReader(catalog)
 			api := NewHandler(reader)
@@ -430,7 +431,7 @@ func recommendationReader(catalogs ...catalogv1.Catalog) *testutil.StoreReader {
 	return &testutil.StoreReader{Catalogs: catalogs}
 }
 
-func testPackage(name string) catalogv1.Package {
+func testPackage(name string) catalogv1.UpdateGraph {
 	return &testutil.Package{LeafGraph: &testutil.LeafGraph{GraphName: name}}
 }
 
