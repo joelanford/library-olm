@@ -7,7 +7,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/blang/semver/v4 v4.0.0
 	github.com/cert-manager/cert-manager v1.20.0
-	github.com/containerd/containerd v1.7.35
+	github.com/containerd/containerd v1.7.36
 	github.com/google/go-cmp v0.7.0
 	github.com/google/renameio/v2 v2.0.2
 	github.com/mitchellh/copystructure v1.2.0
