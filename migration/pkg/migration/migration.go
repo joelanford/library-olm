@@ -47,6 +47,13 @@ type createdMigrationResources struct {
 	ownershipUnknown bool
 }
 
+// MigrationResourcesResult records whether target resources may have started
+// reconciling when CreateMigrationResources returns. Callers must not restart
+// scaled source controllers while TargetMayBeActive is true.
+type MigrationResourcesResult struct {
+	TargetMayBeActive bool
+}
+
 const migrationInvocationAnnotation = "olm.operatorframework.io/migration-invocation"
 
 // Migrate performs the full migration of an OLMv0-managed operator to OLMv1.
@@ -54,10 +61,10 @@ const migrationInvocationAnnotation = "olm.operatorframework.io/migration-invoca
 //  1. Profile the Operator (Subscription/CSV/InstallPlan)
 //  2. Determine Compatibility and Readiness
 //  3. Determine Target ClusterCatalog
-//  4. Backup resources
-//  5. Prepare for Migration (delete Sub/CSV with orphan cascade)
-//  6. Collect Operator Resources
-//  7. Create ClusterObjectSet (wait Succeeded=True)
+//  4. Collect and preflight operator resources
+//  5. Backup resources
+//  6. Prepare for Migration (delete Sub/CSV with orphan cascade)
+//  7. Create ClusterObjectSet (wait Succeeded=True and Available=True)
 //  8. Create ClusterExtension (wait Installed=True)
 //  9. Clean Up OLMv0 Resources
 func (m *Migrator) Migrate(ctx context.Context, opts Options) error {
@@ -105,6 +112,22 @@ func (m *Migrator) Migrate(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	objects, err := m.CollectResources(ctx, opts, csv, ip, info.PackageName)
+	if err != nil {
+		return fmt.Errorf("failed to collect resources: %w", err)
+	}
+	sourceObjects := make([]unstructured.Unstructured, len(objects))
+	for i := range objects {
+		sourceObjects[i] = *objects[i].DeepCopy()
+	}
+	RewriteInstallNamespace(objects, opts.SubscriptionNamespace, opts.InstallNamespace)
+	if err := m.EnsureTargetNamespaceResourcesAbsent(ctx, sourceObjects, objects, opts); err != nil {
+		return err
+	}
+	info.CollectedObjects = objects
+	if err := m.PrepareInstallNamespace(ctx, opts); err != nil {
+		return err
+	}
 
 	backup, err := m.BackupResources(ctx, opts, csv, ip)
 	if err != nil {
@@ -136,12 +159,6 @@ func (m *Migrator) Migrate(ctx context.Context, opts Options) error {
 		return fmt.Errorf("preparation failed (recovered): %w", err)
 	}
 
-	objects, err := m.CollectResources(ctx, opts, csv, ip, info.PackageName)
-	if err != nil {
-		return fmt.Errorf("failed to collect resources: %w", err)
-	}
-	info.CollectedObjects = objects
-
 	// R9: warn about TLS certificate pivot. OLMv0 manages certs directly via its own
 	// cert rotation; OLMv1 delegates to cert-manager (upstream) or openshift-service-ca
 	// (downstream). Pod restarts are expected during this pivot as the new cert secrets
@@ -149,12 +166,34 @@ func (m *Migrator) Migrate(ctx context.Context, opts Options) error {
 	m.progress("Note: TLS certificate management will transfer from OLMv0 to cert-manager/service-ca; " +
 		"expect pod restarts while new cert secrets are provisioned")
 
-	if err := m.CreateMigrationResources(ctx, opts, info, backup); err != nil {
+	restoreSourceDeployments, err := m.ScaleSourceDeployments(ctx, sourceObjects, opts)
+	if err != nil {
+		recoveryCtx, cancel := NewRecoveryContext(ctx)
+		defer cancel()
+		if recoverErr := m.RecoverFromBackup(recoveryCtx, opts, backup); recoverErr != nil {
+			return fmt.Errorf("scale source Deployments: %w; recovery also failed: %v", err, recoverErr)
+		}
+		return fmt.Errorf("scale source Deployments failed (recovered): %w", err)
+	}
+	result, err := m.CreateMigrationResources(ctx, opts, info, backup)
+	if err != nil {
+		if result.TargetMayBeActive {
+			return fmt.Errorf("create migration resources: %w; target ClusterObjectSet may be active, so source Deployments remain scaled to zero", err)
+		}
+		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if restoreErr := restoreSourceDeployments(restoreCtx); restoreErr != nil {
+			return fmt.Errorf("create migration resources: %w; restore source Deployments: %v", err, restoreErr)
+		}
+		return err
+	}
+	if err := m.DeleteSourceNamespaceResources(ctx, sourceObjects, opts); err != nil {
 		return err
 	}
 
-	m.CleanupOLMv0Resources(ctx, opts, info.PackageName, csv.Name)
-
+	if err := m.CleanupOLMv0Resources(ctx, opts, info.PackageName, csv.Name).Err(); err != nil {
+		return fmt.Errorf("clean up OLMv0 resources: %w", err)
+	}
 	return nil
 }
 
@@ -263,7 +302,8 @@ func (m *Migrator) BackupResources(ctx context.Context, opts Options, csv *opera
 }
 
 // PrepareForMigration removes OLMv0 management of the operator by deleting
-// the Subscription and CSV with orphan cascading (operator workloads keep running).
+// the Subscription and CSV with orphan cascading. A later cross-namespace
+// cutover scales source Deployments down before creating target resources.
 func (m *Migrator) PrepareForMigration(ctx context.Context, opts Options, csv *operatorsv1alpha1.ClusterServiceVersion) error {
 	// Delete Subscription with orphan cascading
 	sub := &operatorsv1alpha1.Subscription{}
@@ -283,6 +323,12 @@ func (m *Migrator) PrepareForMigration(ctx context.Context, opts Options, csv *o
 	}
 
 	return nil
+}
+
+// NewRecoveryContext returns a cancellation-independent context with enough
+// time to recreate and observe a restored Subscription.
+func NewRecoveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), subWaitTimeout+30*time.Second)
 }
 
 // RecoverFromBackup restores the Subscription from backup after a failed preparation.
@@ -330,12 +376,13 @@ func (m *Migrator) RecoverBeforeCE(ctx context.Context, opts Options, backup *Ba
 	return m.RecoverFromBackup(ctx, opts, backup)
 }
 
-// recoverCreatedMigrationResources removes objects created by this invocation
-// in reverse dependency order, then restores the OLMv0 Subscription. A failure
-// to delete a ClusterExtension or COS leaves the remaining resources intact and
-// prevents restoration, avoiding concurrent OLMv0 and OLMv1 ownership.
+// recoverCreatedMigrationResources restores OLMv0 only while no target
+// ClusterObjectSet can be active. Once a COS may have reconciled, it preserves
+// the COS, its Secrets, and the ClusterExtension (including its backup
+// annotations) for explicit operator recovery rather than deleting evidence
+// needed to roll the migration back safely.
 func (m *Migrator) recoverCreatedMigrationResources(ctx context.Context, opts Options, backup *Backup, resources *createdMigrationResources) error {
-	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), subWaitTimeout+30*time.Second)
+	recoveryCtx, cancel := NewRecoveryContext(ctx)
 	defer cancel()
 	if resources == nil {
 		return m.RecoverBeforeCE(recoveryCtx, opts, backup)
@@ -343,14 +390,12 @@ func (m *Migrator) recoverCreatedMigrationResources(ctx context.Context, opts Op
 	if resources.ownershipUnknown {
 		return fmt.Errorf("migration resource creation outcome is unknown; refusing automatic recovery")
 	}
+	if resources.cos != nil {
+		return fmt.Errorf("target ClusterObjectSet may have reconciled; preserving migration resources and refusing automatic OLMv0 recovery")
+	}
 	if resources.ce != nil {
 		if err := m.deleteTrackedResource(recoveryCtx, resources.ce); err != nil && client.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("delete created ClusterExtension during recovery: %w", err)
-		}
-	}
-	if resources.cos != nil {
-		if err := m.deleteTrackedResource(recoveryCtx, resources.cos, client.PropagationPolicy(metav1.DeletePropagationOrphan)); err != nil && client.IgnoreNotFound(err) != nil {
-			return fmt.Errorf("delete created ClusterObjectSet during recovery: %w", err)
 		}
 	}
 	cleanupErr := m.cleanupCreatedSecrets(recoveryCtx, resources.secrets)
@@ -423,15 +468,16 @@ func (m *Migrator) CreateClusterObjectSet(ctx context.Context, opts Options, inf
 }
 
 // CreateMigrationResources creates the ClusterObjectSet and its ClusterExtension
-// as one recoverable operation. If either creation fails, it removes only the
-// objects created by this invocation before restoring the OLMv0 Subscription.
-func (m *Migrator) CreateMigrationResources(ctx context.Context, opts Options, info *MigrationInfo, backup *Backup) error {
+// as one recoverable operation. Its result reports whether a target COS may have
+// started reconciling, including when cleanup was requested after a failure.
+func (m *Migrator) CreateMigrationResources(ctx context.Context, opts Options, info *MigrationInfo, backup *Backup) (MigrationResourcesResult, error) {
 	resources, err := m.createClusterObjectSet(ctx, opts, info)
 	if err != nil {
+		result := MigrationResourcesResult{TargetMayBeActive: resources.cos != nil || resources.ownershipUnknown}
 		if recoverErr := m.recoverCreatedMigrationResources(ctx, opts, backup, resources); recoverErr != nil {
-			return fmt.Errorf("COS creation failed: %w; recovery also failed: %v", err, recoverErr)
+			return result, fmt.Errorf("COS creation failed: %w; recovery also failed: %v", err, recoverErr)
 		}
-		return fmt.Errorf("COS creation failed (recovered): %w", err)
+		return result, fmt.Errorf("COS creation failed (recovered): %w", err)
 	}
 
 	ce, ownershipUnknown, err := m.createClusterExtension(ctx, opts, info)
@@ -440,12 +486,13 @@ func (m *Migrator) CreateMigrationResources(ctx context.Context, opts Options, i
 	}
 	resources.ownershipUnknown = resources.ownershipUnknown || ownershipUnknown
 	if err != nil {
+		result := MigrationResourcesResult{TargetMayBeActive: resources.cos != nil || resources.ownershipUnknown}
 		if recoverErr := m.recoverCreatedMigrationResources(ctx, opts, backup, resources); recoverErr != nil {
-			return fmt.Errorf("ClusterExtension creation failed: %w; recovery also failed: %v", err, recoverErr)
+			return result, fmt.Errorf("ClusterExtension creation failed: %w; recovery also failed: %v", err, recoverErr)
 		}
-		return fmt.Errorf("ClusterExtension creation failed (recovered): %w", err)
+		return result, fmt.Errorf("ClusterExtension creation failed (recovered): %w", err)
 	}
-	return nil
+	return MigrationResourcesResult{}, nil
 }
 
 func (m *Migrator) createClusterObjectSet(ctx context.Context, opts Options, info *MigrationInfo) (*createdMigrationResources, error) {
@@ -501,6 +548,7 @@ func (m *Migrator) createClusterObjectSet(ctx context.Context, opts Options, inf
 		secret.Annotations[migrationInvocationAnnotation] = invocationMarker
 		if err := m.Client.Create(ctx, secret); err != nil {
 			if apierrors.IsAlreadyExists(err) {
+				resources.ownershipUnknown = true
 				return resources, fmt.Errorf("failed to create COS ref Secret %s: %w", secret.Name, err)
 			}
 			if m.resolveCreatedObject(context.WithoutCancel(ctx), secret, invocationMarker) {
@@ -564,6 +612,7 @@ func (m *Migrator) createClusterObjectSet(ctx context.Context, opts Options, inf
 	// and Secret cleanup unsafe.
 	if err := m.Client.Create(ctx, cosObj); err != nil {
 		if apierrors.IsAlreadyExists(err) {
+			resources.ownershipUnknown = true
 			return resources, failWithSecretCleanup(fmt.Errorf("failed to create ClusterObjectSet: %w", err))
 		}
 		if m.resolveCreatedObject(context.WithoutCancel(ctx), cosObj, invocationMarker) {
@@ -576,6 +625,9 @@ func (m *Migrator) createClusterObjectSet(ctx context.Context, opts Options, inf
 	resources.cos = cosObj
 
 	if err := m.WaitForCOSSucceeded(ctx, cosName); err != nil {
+		return resources, err
+	}
+	if err := m.WaitForClusterObjectSetAvailable(ctx, cosName); err != nil {
 		return resources, err
 	}
 	return resources, nil
@@ -663,7 +715,6 @@ func (m *Migrator) createClusterExtension(ctx context.Context, opts Options, inf
 	if opts.AcknowledgeNotSteadyState {
 		annotations[AnnotationAcknowledgedPrefix+"not-steady-state"] = "true"
 	}
-
 	ce := &ocv1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        opts.ClusterExtensionName,
@@ -766,6 +817,27 @@ func (m *Migrator) WaitForClusterExtensionInstalled(ctx context.Context, ceName 
 	})
 }
 
+// WaitForClusterObjectSetAvailable waits until the migration COS has observed
+// its workload as available. It runs before the ClusterExtension can replace
+// the migration revision with a catalog revision, so an Installed=True result
+// alone cannot allow source resources to be removed prematurely.
+func (m *Migrator) WaitForClusterObjectSetAvailable(ctx context.Context, cosName string) error {
+	return wait.PollUntilContextTimeout(ctx, cosWaitPollInterval, cosWaitTimeout, true, func(ctx context.Context) (bool, error) {
+		var cos ocv1.ClusterObjectSet
+		if err := m.Client.Get(ctx, types.NamespacedName{Name: cosName}, &cos); err != nil {
+			m.progress(fmt.Sprintf("Waiting for migration COS %s (not found yet)", cosName))
+			return false, err
+		}
+		for _, condition := range cos.Status.Conditions {
+			if condition.Type == ocv1.ClusterObjectSetTypeAvailable && condition.Status == metav1.ConditionTrue {
+				return true, nil
+			}
+		}
+		m.progress(fmt.Sprintf("Waiting for migration ClusterObjectSet %s to reach Available=True...", cosName))
+		return false, nil
+	})
+}
+
 // CleanupAction describes a single cleanup operation and its result.
 type CleanupAction struct {
 	Description string
@@ -777,6 +849,17 @@ type CleanupAction struct {
 // CleanupResult holds the results of all cleanup operations.
 type CleanupResult struct {
 	Actions []CleanupAction
+}
+
+// Err returns all failures encountered while cleaning up OLMv0 resources.
+func (r *CleanupResult) Err() error {
+	var errs []error
+	for _, action := range r.Actions {
+		if action.Error != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", action.Description, action.Error))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // CleanupOLMv0Resources removes remaining OLMv0 resources after migration.
