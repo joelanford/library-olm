@@ -194,6 +194,10 @@ func (m *Migrator) Migrate(ctx context.Context, opts Options) error {
 	if err := m.CleanupOLMv0Resources(ctx, opts, info.PackageName, csv.Name).Err(); err != nil {
 		return fmt.Errorf("clean up OLMv0 resources: %w", err)
 	}
+	if err := m.DeleteSourceNamespace(ctx, opts); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -208,14 +212,16 @@ func (m *Migrator) PrepareClusterObjectSet(ctx context.Context, opts Options) (O
 	if err := m.ensureClusterObjectSetCRD(ctx); err != nil {
 		return opts, err
 	}
-	if opts.SystemNamespace != "" {
-		return opts, nil
+	if opts.SystemNamespace == "" {
+		namespace, err := m.operatorControllerNamespace(ctx)
+		if err != nil {
+			return opts, err
+		}
+		opts.SystemNamespace = namespace
 	}
-	namespace, err := m.operatorControllerNamespace(ctx)
-	if err != nil {
-		return opts, err
+	if opts.AcknowledgeNamespaceDelete && opts.InstallNamespace != opts.SubscriptionNamespace && opts.SystemNamespace == opts.SubscriptionNamespace {
+		return opts, fmt.Errorf("cannot delete source namespace %q: it is the operator-controller namespace used for ClusterObjectSet Secrets", opts.SubscriptionNamespace)
 	}
-	opts.SystemNamespace = namespace
 	return opts, nil
 }
 
@@ -715,6 +721,10 @@ func (m *Migrator) createClusterExtension(ctx context.Context, opts Options, inf
 	if opts.AcknowledgeNotSteadyState {
 		annotations[AnnotationAcknowledgedPrefix+"not-steady-state"] = "true"
 	}
+	if opts.AcknowledgeNamespaceDelete {
+		annotations[AnnotationAcknowledgedPrefix+"namespace-delete"] = "true"
+	}
+
 	ce := &ocv1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        opts.ClusterExtensionName,

@@ -37,11 +37,12 @@ import (
 
 type failingMigrationClient struct {
 	client.Client
-	failCOSCreate    bool
-	unknownCOSCreate bool
-	failCECreate     bool
-	blockCOS         bool
-	succeedCOS       bool
+	failCOSCreate     bool
+	unknownCOSCreate  bool
+	failCECreate      bool
+	failCEAfterCreate bool
+	blockCOS          bool
+	succeedCOS        bool
 }
 
 // canceledScaleClient cancels the caller's context while failing one scale-down
@@ -76,6 +77,14 @@ func (c failingMigrationClient) Create(ctx context.Context, obj client.Object, o
 	if c.failCECreate {
 		if _, ok := obj.(*ocv1.ClusterExtension); ok {
 			return apierrors.NewAlreadyExists(ocv1.GroupVersion.WithResource("clusterextensions").GroupResource(), obj.GetName())
+		}
+	}
+	if c.failCEAfterCreate {
+		if _, ok := obj.(*ocv1.ClusterExtension); ok {
+			if err := c.Client.Create(ctx, obj, opts...); err != nil {
+				return err
+			}
+			return errors.New("simulated ClusterExtension create transport failure")
 		}
 	}
 	if c.succeedCOS {
@@ -418,7 +427,7 @@ func TestPrepareInstallNamespace(t *testing.T) {
 	}
 }
 
-func TestInstallNamespaceRewriteAndSourceResourceDeletion(t *testing.T) {
+func TestInstallNamespaceRewriteAndDeletionAcknowledgement(t *testing.T) {
 	ctx := context.Background()
 	objects := []unstructured.Unstructured{
 		{Object: map[string]interface{}{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]interface{}{"name": "in-source", "namespace": "source"}}},
@@ -529,6 +538,22 @@ func TestInstallNamespaceRewriteAndSourceResourceDeletion(t *testing.T) {
 		"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]interface{}{"name": "no-uid", "namespace": "source"},
 	}}}, Options{SubscriptionNamespace: "source", InstallNamespace: "target"}); err == nil {
 		t.Fatal("DeleteSourceNamespaceResources() unexpectedly deleted an object without a UID")
+	}
+
+	m := migrationTestClient(t, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "source"}})
+	opts := Options{SubscriptionNamespace: "source", InstallNamespace: "target"}
+	if err := m.DeleteSourceNamespace(ctx, opts); err != nil {
+		t.Fatalf("DeleteSourceNamespace(unacknowledged) error = %v", err)
+	}
+	if err := m.Client.Get(ctx, client.ObjectKey{Name: "source"}, &corev1.Namespace{}); err != nil {
+		t.Fatalf("unacknowledged deletion removed source namespace: %v", err)
+	}
+	opts.AcknowledgeNamespaceDelete = true
+	if err := m.DeleteSourceNamespace(ctx, opts); err != nil {
+		t.Fatalf("DeleteSourceNamespace(acknowledged) error = %v", err)
+	}
+	if err := m.Client.Get(ctx, client.ObjectKey{Name: "source"}, &corev1.Namespace{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("acknowledged deletion source namespace error = %v, want not found", err)
 	}
 }
 
@@ -736,6 +761,39 @@ func TestPrepareClusterObjectSetRejectsExistingClusterExtension(t *testing.T) {
 	_, err := m.PrepareClusterObjectSet(context.Background(), Options{SubscriptionName: "sub", SubscriptionNamespace: "operators"})
 	if err == nil || !strings.Contains(err.Error(), "ClusterExtension sub already exists") {
 		t.Fatalf("PrepareClusterObjectSet() error = %v, want existing ClusterExtension error", err)
+	}
+}
+
+func TestPrepareClusterObjectSetRejectsDeletingOperatorControllerNamespace(t *testing.T) {
+	establishedCRD := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: clusterObjectSetCRDName},
+		Status: apiextensionsv1.CustomResourceDefinitionStatus{Conditions: []apiextensionsv1.CustomResourceDefinitionCondition{{
+			Type:   apiextensionsv1.Established,
+			Status: apiextensionsv1.ConditionTrue,
+		}}},
+	}
+	controller := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
+		Name:      operatorControllerDeployName,
+		Namespace: "operator-controller",
+		Labels:    map[string]string{"app.kubernetes.io/name": "operator-controller"},
+	}}
+	for name, opts := range map[string]Options{
+		"configured namespace": {
+			SubscriptionName: "sub", SubscriptionNamespace: "operator-controller", InstallNamespace: "target",
+			SystemNamespace: "operator-controller", AcknowledgeNamespaceDelete: true,
+		},
+		"discovered namespace": {
+			SubscriptionName: "sub", SubscriptionNamespace: "operator-controller", InstallNamespace: "target",
+			AcknowledgeNamespaceDelete: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := migrationTestClient(t, establishedCRD, controller)
+			_, err := m.PrepareClusterObjectSet(context.Background(), opts)
+			if err == nil || !strings.Contains(err.Error(), "cannot delete source namespace \"operator-controller\"") {
+				t.Fatalf("PrepareClusterObjectSet() error = %v, want source operator-controller namespace deletion rejection", err)
+			}
+		})
 	}
 }
 
@@ -1112,6 +1170,28 @@ func TestCreateClusterExtensionAlreadyExistsIsKnownOutcome(t *testing.T) {
 	}
 }
 
+func TestCreateClusterExtensionRecordsNamespaceDeletionAcknowledgement(t *testing.T) {
+	ctx := context.Background()
+	m := migrationTestClient(t)
+	m.Client = failingMigrationClient{Client: m.Client, failCEAfterCreate: true}
+	_, _, err := m.createClusterExtension(ctx, Options{
+		SubscriptionName:           "sub",
+		SubscriptionNamespace:      "source",
+		ClusterExtensionName:       "sub",
+		AcknowledgeNamespaceDelete: true,
+	}, &MigrationInfo{PackageName: "widgets"})
+	if err == nil {
+		t.Fatal("createClusterExtension() unexpectedly succeeded")
+	}
+	var ce ocv1.ClusterExtension
+	if getErr := m.Client.Get(ctx, client.ObjectKey{Name: "sub"}, &ce); getErr != nil {
+		t.Fatalf("get created ClusterExtension: %v", getErr)
+	}
+	if got := ce.Annotations[AnnotationAcknowledgedPrefix+"namespace-delete"]; got != "true" {
+		t.Fatalf("namespace deletion acknowledgement = %q, want true", got)
+	}
+}
+
 func TestCreateMigrationResourcesPreservesTrackedCOSAfterClusterExtensionFailure(t *testing.T) {
 	ctx := context.Background()
 	m := migrationTestClient(t)
@@ -1311,5 +1391,27 @@ func TestRollbackRejectsMissingAndMalformedBackupsWithoutMutation(t *testing.T) 
 				t.Fatalf("invalid rollback deleted ClusterObjectSet: %v", err)
 			}
 		})
+	}
+}
+
+func TestRollbackRejectsMissingSourceNamespaceWithoutMutation(t *testing.T) {
+	ctx := context.Background()
+	ce := &ocv1.ClusterExtension{ObjectMeta: metav1.ObjectMeta{
+		Name: "sub",
+		Annotations: map[string]string{
+			MigratedFromSubscriptionAnnotation:    "deleted-source/sub",
+			MigrationSubscriptionBackupAnnotation: `{"name":"widgets","source":"catalog","sourceNamespace":"olm"}`,
+		},
+	}}
+	cos := &ocv1.ClusterObjectSet{ObjectMeta: metav1.ObjectMeta{Name: "sub-1"}}
+	m := migrationTestClient(t, ce, cos)
+	if err := m.Rollback(ctx, Options{ClusterExtensionName: "sub", AcknowledgeInstalled: true}); err == nil || !strings.Contains(err.Error(), "source namespace \"deleted-source\" must exist") {
+		t.Fatalf("Rollback() error = %v, want missing source namespace error", err)
+	}
+	if err := m.Client.Get(ctx, client.ObjectKeyFromObject(ce), &ocv1.ClusterExtension{}); err != nil {
+		t.Fatalf("rollback deleted ClusterExtension before source namespace preflight: %v", err)
+	}
+	if err := m.Client.Get(ctx, client.ObjectKeyFromObject(cos), &ocv1.ClusterObjectSet{}); err != nil {
+		t.Fatalf("rollback deleted ClusterObjectSet before source namespace preflight: %v", err)
 	}
 }

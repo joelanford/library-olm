@@ -51,10 +51,19 @@ func TestDryRunCleanupPlanNamespaceChange(t *testing.T) {
 	for _, expected := range []string{
 		"Create or update install namespace widget-system with PSA/SCC labels copied from operators.",
 		"Move collected namespaced operator resources from operators to widget-system and delete their source copies after ClusterExtension installation.",
-		"Retain source namespace operators.",
+		"Retain source namespace operators; --acknowledge-namespace-delete was not specified.",
 	} {
 		if !strings.Contains(plan, expected) {
 			t.Fatalf("dry-run cleanup plan missing %q:\n%s", expected, plan)
 		}
+	}
+
+	opts.AcknowledgeNamespaceDelete = true
+	plan = strings.Join(dryRunCleanupPlan(opts, info), "\n")
+	if !strings.Contains(plan, "Delete source namespace operators after migration (--acknowledge-namespace-delete); this also removes any remaining InstallPlans and OperatorGroups.") {
+		t.Fatalf("dry-run cleanup plan does not disclose source deletion:\n%s", plan)
+	}
+	if strings.Contains(plan, "Retain InstallPlan resources") || strings.Contains(plan, "Retain OperatorGroup(s)") {
+		t.Fatalf("dry-run cleanup plan incorrectly retains resources removed with the source namespace:\n%s", plan)
 	}
 }
