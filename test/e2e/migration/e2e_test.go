@@ -432,6 +432,11 @@ func TestMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("capture source Subscription for conflict cleanup: %v\n%s", err, subscriptionJSON)
 	}
+	var rollbackState *rollbackSnapshot
+	if os.Getenv("E2E_SUITE") == "real-operator" {
+		waitForCompletedInstallPlan(t, namespace, subscription)
+		rollbackState = captureRollbackSnapshot(t, namespace, subscription, strings.TrimSpace(csvName))
+	}
 
 	// Catalog migration is deliberately run before the operator check: C7 is a
 	// hard prerequisite and this verifies the prescribed command sequence.
@@ -465,17 +470,34 @@ func TestMigration(t *testing.T) {
 		t.Fatal("Subscription still exists after successful conversion")
 	}
 	if os.Getenv("E2E_SUITE") == "real-operator" {
+		// Pause the injected conflict at manual approval: an automatic install
+		// can recreate its CSV during cleanup and leave an unreferenced provider
+		// that prevents the rollback Subscription from resolving.
 		restoreSubscriptionForConflict(t, subscriptionJSON)
+		run(t, "kubectl", "wait", "--for=jsonpath={.status.conditions[?(@.type=='InstallPlanPending')].reason}=RequiresApproval", "subscription/"+subscription, "-n", namespace, "--timeout=10m")
+		conflictPlan, err := output("kubectl", "get", "subscription/"+subscription, "-n", namespace, "-o", "jsonpath={.status.installPlanRef.name}")
+		if err != nil || strings.TrimSpace(conflictPlan) == "" {
+			t.Fatalf("get unapproved conflict InstallPlan: %v (%s)", err, conflictPlan)
+		}
+		run(t, "kubectl", "wait", "--for=jsonpath={.status.phase}=RequiresApproval", "installplan/"+strings.TrimSpace(conflictPlan), "-n", namespace, "--timeout=10m")
 		run(t, binary(t, "migrate-operators-v0-to-v1"), "cleanup", subscription, "--kubeconfig", os.Getenv("KUBECONFIG"))
 		run(t, "kubectl", "get", "clusterextension", subscription)
 		if _, err := output("kubectl", "get", "subscription", subscription, "-n", namespace); err == nil {
 			t.Fatal("cleanup left the conflict Subscription in place")
 		}
+		// Remove only the test-injected, unapproved plan. Otherwise the original
+		// automatic Subscription restored by rollback would inherit this manual
+		// approval requirement rather than exercising automatic recovery.
+		run(t, "kubectl", "delete", "installplan/"+strings.TrimSpace(conflictPlan), "-n", namespace, "--cascade=orphan")
+		assertRollbackResourcesRetained(t, rollbackState)
+		_, kubeClient, _ := newMigrator(t)
+		beforeRefusal := captureRollbackManagement(t, kubeClient, subscription)
 		if _, err := output(binary(t, "migrate-operators-v0-to-v1"), "rollback", subscription, "--kubeconfig", os.Getenv("KUBECONFIG")); err == nil {
 			t.Fatal("rollback of an installed ClusterExtension succeeded without acknowledgment")
 		}
+		assertRollbackManagementRetained(t, kubeClient, beforeRefusal)
 		run(t, binary(t, "migrate-operators-v0-to-v1"), "rollback", subscription, "--acknowledge-installed", "--kubeconfig", os.Getenv("KUBECONFIG"))
-		run(t, "kubectl", "get", "subscription", subscription, "-n", namespace)
+		assertRollbackRestored(t, kubeClient, rollbackState, beforeRefusal)
 	}
 }
 
@@ -589,6 +611,15 @@ func TestLiveCrossNamespaceDeletionMigration(t *testing.T) {
 		"pod-security.kubernetes.io/audit=restricted",
 		"security.openshift.io/scc.podSecurityLabelSync=true", "--overwrite")
 
+	// Direct invocations must also finish the source install before migration
+	// removes its CSV and scales its Deployment down for the namespace cutover.
+	waitForCompletedInstallPlan(t, namespace, subscription)
+	csvName, err := output("kubectl", "get", "subscription/"+subscription, "-n", namespace, "-o", "jsonpath={.status.installedCSV}")
+	if err != nil || strings.TrimSpace(csvName) == "" {
+		t.Fatalf("get installed source CSV: %v (%s)", err, csvName)
+	}
+	run(t, "kubectl", "wait", "--for=jsonpath={.status.phase}=Succeeded", "csv/"+strings.TrimSpace(csvName), "-n", namespace, "--timeout=10m")
+
 	// Migrate catalogs before converting the Subscription so C7 is satisfied.
 	run(t, binary(t, "migrate-catalogs-v0-to-v1"), "--kubeconfig", os.Getenv("KUBECONFIG"))
 	run(t, binary(t, "migrate-operators-v0-to-v1"), "convert", subscription,
@@ -618,8 +649,20 @@ func escapeJSONPathLabel(label string) string {
 	return strings.ReplaceAll(label, ".", `\.`)
 }
 
+// waitForCompletedInstallPlan checks the source plan itself: a Subscription can
+// reach AtLatestKnown before its InstallPlan finishes applying resources.
+func waitForCompletedInstallPlan(t *testing.T, namespace, subscription string) {
+	t.Helper()
+	plan, err := output("kubectl", "get", "subscription/"+subscription, "-n", namespace, "-o", "jsonpath={.status.installPlanRef.name}")
+	if err != nil || strings.TrimSpace(plan) == "" {
+		t.Fatalf("get InstallPlan for Subscription %s/%s: %v (%s)", namespace, subscription, err, plan)
+	}
+	run(t, "kubectl", "wait", "--for=jsonpath={.status.phase}=Complete", "installplan/"+strings.TrimSpace(plan), "-n", namespace, "--timeout=10m")
+}
+
 // restoreSubscriptionForConflict replays the pre-migration Subscription without
-// its API-assigned state, creating the Conflict state exercised by cleanup.
+// its API-assigned state. Manual approval creates the Conflict state exercised
+// by cleanup without launching an automatic reinstall of OLMv1-owned workloads.
 func restoreSubscriptionForConflict(t *testing.T, raw string) {
 	t.Helper()
 	var subscription map[string]interface{}
@@ -627,6 +670,11 @@ func restoreSubscriptionForConflict(t *testing.T, raw string) {
 		t.Fatalf("decode captured Subscription: %v", err)
 	}
 	delete(subscription, "status")
+	spec, ok := subscription["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatal("captured Subscription has no spec")
+	}
+	spec["installPlanApproval"] = "Manual"
 	metadata, ok := subscription["metadata"].(map[string]interface{})
 	if !ok {
 		t.Fatal("captured Subscription has no metadata")
@@ -724,12 +772,18 @@ func collectArtifacts(t *testing.T, namespace string) {
 	}
 	for _, resource := range [][]string{
 		{"get", "all", "-n", namespace, "-o", "yaml"},
+		{"get", "subscriptions,clusterserviceversions,installplans,operatorgroups,operatorconditions", "-n", namespace, "-o", "yaml"},
 		{"get", "events", "-n", namespace, "-o", "yaml"},
 		{"get", "clusterextensions,clusterobjectsets,clustercatalogs", "-o", "yaml"},
 		{"get", "events", "-n", "olmv1-system", "-o", "yaml"},
 		{"logs", "deployment/catalogd-controller-manager", "-n", "olmv1-system", "--all-containers", "--tail=-1"},
 		{"logs", "deployment/operator-controller-controller-manager", "-n", "olmv1-system", "--all-containers", "--tail=-1"},
+		{"logs", "deployment/catalog-operator", "-n", "olm", "--all-containers", "--tail=-1"},
+		{"logs", "deployment/olm-operator", "-n", "olm", "--all-containers", "--tail=-1"},
 	} {
+		if resource[0] == "logs" && resource[3] == "olm" && os.Getenv("E2E_SUITE") != "real-operator" {
+			continue // Fixture clusters deliberately have no OLMv0 controllers.
+		}
 		out, _ := output("kubectl", resource...)
 		name := strings.NewReplacer(",", "-", "/", "-").Replace(strings.Join(resource[:2], "-"))
 		for i, arg := range resource[:len(resource)-1] {

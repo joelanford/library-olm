@@ -11,7 +11,7 @@ pushes to `main`.
 | Suite | Cluster | Catalog content | Purpose |
 |---|---|---|---|
 | `fixture` | kind + OLMv1 + OLMv0 CRDs only (no OLMv0 controllers) | Committed OLMv0-install snapshots and a digest-pinned CatalogSource | Deterministic coverage of V1, V2, V3, V4. |
-| `real-operator` | separate kind cluster with OLMv0 + OLMv1 | OLMv0's installed OperatorHub catalog | Proves V5.2–V5.8 with real deployed operators. |
+| `real-operator` | separate kind cluster with OLMv0 + OLMv1 | OLMv0's installed OperatorHub catalog | Covers V5.2–V5.6 plus cleanup and healthy rollback (V5.8). V5.7 upgrade remains a gap. |
 | `in-cluster-job` | fixture cluster | A replayed ecr-secret-operator installation | Proves both CLIs authenticate and migrate using only a Pod ServiceAccount. |
 | `kind-only` | kind + OLMv1 | Local fixture objects, no OLMv0 controllers | Fast contract tests for resource rendering and COS adoption prerequisites. |
 
@@ -91,6 +91,11 @@ remains unit-only. The test process invokes the built CLIs for command behavior;
 the Kubernetes client only for setup and assertions. Every wait has a bounded timeout and
 prints current objects/events on timeout.
 
+Live setup waits for the source InstallPlan to reach `Complete` before checking CSV health.
+`AtLatestKnown` alone does not prove installation has finished. The live namespace-deletion
+scenario also enforces this prerequisite when invoked directly, and failure diagnostics include
+both OLMv0 controller logs to identify installations racing the cutover.
+
 `make migration/test-e2e-fixture-matrix` runs only deterministic fixture scenarios. `make
 migration/test-e2e-live-matrix` runs only the real-operator smoke scenarios. Both use the Kind-generated
 kubeconfig by default. The
@@ -110,6 +115,22 @@ and failure artifacts, but do not impose an E2E percentage threshold; the unit s
 coverage while still showing which migration paths the E2E suite executes.
 
 ## CI rollout
+
+The live matrix's `TestMigration` verifies conflict cleanup and rollback. Cleanup retains
+operator Deployments, CRDs, OperatorGroups, and the ClusterExtension, while orphan-deleting
+the conflicting primary CSV and removing its OLMv0 artifacts. The injected conflict uses
+manual approval to prevent an automatic install from racing cleanup. Its unapproved test-only
+InstallPlan is removed before rollback; the original source InstallPlan is retained.
+An unacknowledged rollback
+preserves CE backup annotations and COS revisions; an acknowledged rollback must remove all
+CE/COS management and restore the original Subscription spec, an `AtLatestKnown` Subscription,
+a `Succeeded` CSV, and available Deployments within ten minutes. Unit tests additionally verify
+orphan deletion policies, preservation of unrelated revisions, revision-list preflight failures,
+and recovery creation/reconciliation failures without changing the backup. Conflict-cleanup
+regressions cover CSV discovery without Subscription status, refusal to remove shared or
+mismatched-package CSVs, and propagation of discovery/deletion errors. Failure artifacts
+include OLMv0 Subscriptions, CSVs, InstallPlans, OperatorGroups, and OperatorConditions, and
+rollback timeouts identify the resource and reconciliation state still blocking recovery.
 
 1. The `migration-test` workflow runs unit coverage, fixture E2E, live-operator E2E, COS
    supersession E2E, and the in-cluster Job E2E independently. Unit, fixture, and live tests
