@@ -38,7 +38,8 @@ var convertCmd = &cobra.Command{
 	Long: `Migrates an OLMv0 Subscription/CSV to OLMv1 ClusterExtension/ClusterObjectSet.
 
 Use --dry-run to preview without making changes.
-Use --all to migrate all eligible operators.
+Use --all to migrate all eligible operators across all namespaces. The -n/--namespace
+and --ce-name flags apply only to a single operator.
 
 Target is a Subscription name (with -n namespace), or --all.
 
@@ -78,6 +79,12 @@ func runConvert(cmd *cobra.Command, args []string) error { //nolint:nestif
 	if convertAll && (convertInstallNs != "" || convertAckNamespaceDelete) {
 		return fmt.Errorf("--install-namespace and --acknowledge-namespace-delete require a single operator")
 	}
+	if convertAll && (convertNamespace != "" || cmd.Flags().Changed("namespace")) {
+		return fmt.Errorf("-n/--namespace cannot be combined with --all; --all scans every namespace")
+	}
+	if convertAll && (convertCEName != "" || cmd.Flags().Changed("ce-name")) {
+		return fmt.Errorf("--ce-name cannot be combined with --all; each operator uses its Subscription name")
+	}
 
 	c, restCfg, err := newClient()
 	if err != nil {
@@ -89,9 +96,18 @@ func runConvert(cmd *cobra.Command, args []string) error { //nolint:nestif
 	ctx := cmd.Context()
 
 	if convertAll { //nolint:nestif
+		batchOpts := migration.Options{
+			BackupDirectory:                 convertBackupDir,
+			DeleteOperatorGroup:             convertDeleteOG,
+			AcknowledgeWatchScopeChange:     convertAckWatchScope,
+			AcknowledgeOperatorCondition:    convertAckOpCond,
+			AcknowledgeOLMv0APIAccess:       convertAckOLMv0API,
+			AcknowledgeScopedServiceAccount: convertAckScopedSA,
+			AcknowledgeNotSteadyState:       convertAckNotSteady,
+		}
 		fmt.Printf("\n%s%s🔎 Scanning all Subscriptions for migration...%s\n", colorBold, colorCyan, colorReset)
 		startProgress()
-		results, err := m.ScanAllSubscriptions(ctx)
+		results, err := m.ScanAllSubscriptionsWithOptions(ctx, batchOpts)
 		clearProgress()
 		if err != nil {
 			return fmt.Errorf("scan failed: %w", err)
@@ -101,43 +117,9 @@ func runConvert(cmd *cobra.Command, args []string) error { //nolint:nestif
 			fmt.Printf(format, a...)
 		})
 
-		eligible := migration.EligibleFromScan(results)
-		if len(eligible) == 0 {
-			info("No eligible operators to migrate.")
-			return nil
-		}
-
-		fmt.Printf("\n%s%sMigrating %d eligible operator(s)...%s\n", colorBold, colorCyan, len(eligible), colorReset)
-
-		var firstErr error
-		for _, r := range eligible {
-			info(fmt.Sprintf("Migrating %s/%s...", r.SubscriptionNamespace, r.SubscriptionName))
-			opts := migration.Options{
-				SubscriptionName:                r.SubscriptionName,
-				SubscriptionNamespace:           r.SubscriptionNamespace,
-				BackupDirectory:                 convertBackupDir,
-				DeleteOperatorGroup:             convertDeleteOG,
-				AcknowledgeWatchScopeChange:     convertAckWatchScope,
-				AcknowledgeOperatorCondition:    convertAckOpCond,
-				AcknowledgeOLMv0APIAccess:       convertAckOLMv0API,
-				AcknowledgeScopedServiceAccount: convertAckScopedSA,
-				AcknowledgeNotSteadyState:       convertAckNotSteady,
-			}
-			opts.ApplyDefaults()
-
-			if err := m.Migrate(ctx, opts); err != nil {
-				fail(fmt.Sprintf("%s/%s: %v", r.SubscriptionNamespace, r.SubscriptionName, err))
-				if !convertContinueOnErr {
-					return err
-				}
-				if firstErr == nil {
-					firstErr = err
-				}
-			} else {
-				success(fmt.Sprintf("%s/%s migrated", r.SubscriptionNamespace, r.SubscriptionName))
-			}
-		}
-		return firstErr
+		return convertBatch(ctx, results, batchOpts, convertDryRun, convertContinueOnErr, m.Migrate, func(opts migration.Options) error {
+			return runConvertDryRun(cmd, m, opts)
+		})
 	}
 
 	// Single operator
