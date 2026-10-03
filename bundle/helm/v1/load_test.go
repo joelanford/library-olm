@@ -24,7 +24,7 @@ func TestFromFS(t *testing.T) {
 				require.Equal(t, "parent-default", chart.Values["parent"].(map[string]any)["defaultOnly"])
 				require.NotEmpty(t, chart.Schema)
 				require.Len(t, chart.Templates, 5)
-				require.Len(t, chart.CRDs(), 1)
+				require.Len(t, chart.CRDObjects(), 1)
 				require.Len(t, chart.Dependencies(), 3)
 				require.Contains(t, []string{chart.Dependencies()[0].Name(), chart.Dependencies()[1].Name(), chart.Dependencies()[2].Name()}, "child")
 				require.Contains(t, []string{chart.Dependencies()[0].Name(), chart.Dependencies()[1].Name(), chart.Dependencies()[2].Name()}, "library")
