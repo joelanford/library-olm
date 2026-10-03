@@ -18,6 +18,11 @@ updates:
     cooldown:
       default-days: 14
     multi-ecosystem-group: "all-dependencies"
+    groups:
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: "gomod"
     directory: "/"
@@ -26,3 +31,8 @@ updates:
     cooldown:
       default-days: 14
     multi-ecosystem-group: "all-dependencies"
+    groups:
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
