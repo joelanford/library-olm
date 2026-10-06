@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -597,6 +598,84 @@ func TestPrepareInstallNamespaceRejectsWeakerPSA(t *testing.T) {
 	}
 	if got := unchanged.Labels["pod-security.kubernetes.io/enforce"]; got != "restricted" {
 		t.Fatalf("target PSA enforcement = %q, want restricted", got)
+	}
+}
+
+func TestPrepareInstallNamespaceRejectsExistingSystemManagedTarget(t *testing.T) {
+	ctx := context.Background()
+	source := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   "source",
+		Labels: map[string]string{"pod-security.kubernetes.io/enforce": "restricted"},
+	}}
+	target := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   "target",
+		Labels: map[string]string{"existing.example.test/owner": "user"},
+	}}
+	m := migrationTestClient(t, source, target)
+	err := m.PrepareInstallNamespace(ctx, Options{
+		SubscriptionNamespace:         source.Name,
+		InstallNamespace:              target.Name,
+		SystemManagedInstallNamespace: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not owned by this migration") {
+		t.Fatalf("PrepareInstallNamespace() error = %v, want existing system-managed target rejection", err)
+	}
+
+	var unchanged corev1.Namespace
+	if err := m.Client.Get(ctx, client.ObjectKey{Name: target.Name}, &unchanged); err != nil {
+		t.Fatalf("get target namespace: %v", err)
+	}
+	if !reflect.DeepEqual(unchanged.Labels, target.Labels) {
+		t.Fatalf("target labels changed: got %#v, want %#v", unchanged.Labels, target.Labels)
+	}
+}
+
+func TestPrepareInstallNamespaceAllowsSystemManagedRetry(t *testing.T) {
+	ctx := context.Background()
+	source := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   "source",
+		Labels: map[string]string{"pod-security.kubernetes.io/enforce": "restricted"},
+	}}
+	opts := Options{
+		SubscriptionName:              "operator",
+		SubscriptionNamespace:         source.Name,
+		InstallNamespace:              "target",
+		SystemManagedInstallNamespace: true,
+	}
+	m := migrationTestClient(t, source)
+	if err := m.PrepareInstallNamespace(ctx, opts); err != nil {
+		t.Fatalf("PrepareInstallNamespace(create) error = %v", err)
+	}
+
+	var created corev1.Namespace
+	if err := m.Client.Get(ctx, client.ObjectKey{Name: opts.InstallNamespace}, &created); err != nil {
+		t.Fatalf("get created target namespace: %v", err)
+	}
+	if got, want := created.Annotations[systemManagedNamespaceOwnerAnnotation], systemManagedNamespaceOwner(opts); got != want {
+		t.Fatalf("system-managed owner annotation = %q, want %q", got, want)
+	}
+
+	if err := m.PrepareInstallNamespace(ctx, opts); err != nil {
+		t.Fatalf("PrepareInstallNamespace(retry) error = %v", err)
+	}
+}
+
+func TestPrepareInstallNamespaceRejectsSystemManagedTargetOwnedByAnotherMigration(t *testing.T) {
+	ctx := context.Background()
+	source := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "source"}}
+	target := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:        "target",
+		Annotations: map[string]string{systemManagedNamespaceOwnerAnnotation: "other/source"},
+	}}
+	m := migrationTestClient(t, source, target)
+	err := m.PrepareInstallNamespace(ctx, Options{
+		SubscriptionName:              "operator",
+		SubscriptionNamespace:         source.Name,
+		InstallNamespace:              target.Name,
+		SystemManagedInstallNamespace: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not owned by this migration") {
+		t.Fatalf("PrepareInstallNamespace() error = %v, want ownership rejection", err)
 	}
 }
 
