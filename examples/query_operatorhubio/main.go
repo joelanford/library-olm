@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/operator-framework/library-olm/image"
+	imgbundle "github.com/operator-framework/library-olm/image/bundle"
+	imgcatalog "github.com/operator-framework/library-olm/image/catalog"
 	"go.podman.io/image/v5/docker"
 	"go.podman.io/image/v5/types"
 
@@ -18,9 +21,6 @@ import (
 	catalogv1 "github.com/joelanford/library-olm/catalog/v1"
 	"github.com/joelanford/library-olm/catalog/v1/fbc"
 	"github.com/joelanford/library-olm/catalog/v1/sqlite"
-	"github.com/joelanford/library-olm/image"
-	imgbundle "github.com/joelanford/library-olm/image/bundle"
-	imgcatalog "github.com/joelanford/library-olm/image/catalog"
 )
 
 const catalogImage = "docker://quay.io/operatorhubio/catalog:latest"
