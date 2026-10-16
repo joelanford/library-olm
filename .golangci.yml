@@ -31,9 +31,9 @@ linters:
           alias: registryv1
         - pkg: github.com/joelanford/library-olm/catalog/v1
           alias: catalogv1
-        - pkg: github.com/joelanford/library-olm/image/bundle
+        - pkg: github.com/operator-framework/library-olm/image/bundle
           alias: imgbundle
-        - pkg: github.com/joelanford/library-olm/image/catalog
+        - pkg: github.com/operator-framework/library-olm/image/catalog
           alias: imgcatalog
         - pkg: github.com/blang/semver/v4
           alias: bsemver
