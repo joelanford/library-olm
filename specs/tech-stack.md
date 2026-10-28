@@ -48,11 +48,6 @@ catalog/                         — catalog API, persistent store, formats, and
     sqlite/                      — SQLite-backed Store implementation (OpenStore)
     fbc/                         — FBC importer (public: Importer, NewImporter)
       internal/                  — raw table schema, ingest, handler dispatch
-image/                           — OCI registry access and content unpacking
-  bundle/                        — bundle image handlers (registry+v1, Helm)
-  catalog/                       — catalog image handlers (FBC)
-  internal/ociutil/              — shared manifest discovery and layer extraction
-  internal/testutil/             — shared image test infrastructure
 resolver/                        — bundle resolution from catalogs
   v1/                            — canonical resolver: priority-based catalog selection, graph/version/successor filtering
 internal/util/                   — shared internal utilities

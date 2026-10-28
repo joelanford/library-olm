@@ -12,10 +12,6 @@ catalog/             — catalog API, persistent store, formats, and querying
   v1/                — catalog interfaces (Catalog, Store, Writer, Importer)
     sqlite/          — SQLite-backed Store implementation (OpenStore)
     fbc/             — FBC importer (NewFSImporter, NewReaderImporter → catalogv1.Importer)
-image/               — OCI registry access and content unpacking
-  bundle/            — bundle image handlers (registry+v1, Helm)
-  catalog/           — catalog image handlers (FBC)
-  internal/ociutil/  — shared manifest discovery and layer extraction utilities
 resolver/            — bundle resolution from catalogs
 ```
 

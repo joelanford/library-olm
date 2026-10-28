@@ -14,9 +14,6 @@ go get github.com/joelanford/library-olm
 | `bundle/registry/v1` | Parse registry+v1 bundles from a filesystem (`FromFS`) and render to plain Kubernetes manifests (`ToPlainManifests`) |
 | `catalog/v1` | Persistent multi-catalog store (`OpenStore`, `Store`) with `Catalog`, `UpdateGraph`, `CompositeUpdateGraph` query interfaces and `Writer`/`Importer` for format-specific import |
 | `catalog/v1/fbc` | FBC importer (`NewFSImporter`, `NewReaderImporter`) - imports File-Based Catalog data into a `catalog/v1` store |
-| `image` | OCI registry access (`Repository`), caching (`CachingRepository`), and content-type-based unpacking (`Unpacker`) |
-| `image/bundle` | Image handlers for registry+v1 bundles and Helm chart OCI artifacts |
-| `image/catalog` | Image handler for file-based catalog (FBC) images with multi-platform support |
 
 ## Examples
 
@@ -25,8 +22,6 @@ Runnable examples are embedded as Go [testable examples](https://go.dev/blog/exa
 - [`bundle/v1`](bundle/v1/example_test.go) — parsing releases, comparing bundle identities
 - [`bundle/registry/v1`](bundle/registry/v1/example_test.go) — parsing a bundle from a filesystem and rendering to plain Kubernetes manifests
 - [`catalog/v1/fbc`](catalog/v1/fbc/example_test.go) — importing an FBC catalog into a store and querying packages, channels, bundles, and upgrade paths
-- [`image`](image/example_test.go) — building a custom handler and unpacking OCI image content with filters
-
 For a more complete end-to-end example that pulls a real catalog image from a registry:
 
 - [`examples/query_operatorhubio`](examples/query_operatorhubio) — extract the OperatorHub.io catalog image, load it, and exercise the full query API
